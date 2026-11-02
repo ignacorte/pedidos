@@ -1,0 +1,8 @@
+Librerías y modelos de código abierto alojados con la app (así no se carga código de otros sitios; ver la política de seguridad en index.html). Copiadas de la app Liquidaciones.
+- paddle/: lector de texto PaddleOCR PP-OCRv5 (Apache-2.0, https://github.com/PaddlePaddle/PaddleOCR)
+  · det.onnx (detección de renglones, mobile) y rec_latin.onnx (reconocimiento latino, mobile) en formato ONNX
+    (conversión de RapidOCR, https://github.com/RapidAI/RapidOCR); dict_latin.txt = diccionario del modelo.
+  · paddleocr.mjs: paddleocr.js 1.2.0 (MIT, https://www.npmjs.com/package/paddleocr)
+  · ort.wasm.min.mjs, ort-wasm-simd-threaded.*: ONNX Runtime Web 1.30.0 (MIT, Microsoft)
+- pdf.js 3.11.174 (Apache-2.0) — https://github.com/mozilla/pdf.js
+Descargados el 21/10/2026. Para actualizarlos, cambiar también la versión de LIBRERIAS en sw.js.

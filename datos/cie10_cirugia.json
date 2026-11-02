@@ -1,0 +1,477 @@
+{
+"fuente": "CIE-10 (OMS), selección de diagnósticos frecuentes en cirugía general",
+"diagnosticos": [
+{
+"codigo": "K40.9",
+"descripcion": "Hernia inguinal unilateral o no especificada, sin obstrucción ni gangrena"
+},
+{
+"codigo": "K40.2",
+"descripcion": "Hernia inguinal bilateral, sin obstrucción ni gangrena"
+},
+{
+"codigo": "K40.3",
+"descripcion": "Hernia inguinal unilateral, con obstrucción, sin gangrena"
+},
+{
+"codigo": "K40.4",
+"descripcion": "Hernia inguinal unilateral, con gangrena"
+},
+{
+"codigo": "K40.0",
+"descripcion": "Hernia inguinal bilateral, con obstrucción, sin gangrena"
+},
+{
+"codigo": "K41.9",
+"descripcion": "Hernia femoral unilateral, sin obstrucción ni gangrena"
+},
+{
+"codigo": "K41.3",
+"descripcion": "Hernia femoral unilateral, con obstrucción, sin gangrena"
+},
+{
+"codigo": "K42.9",
+"descripcion": "Hernia umbilical sin obstrucción ni gangrena"
+},
+{
+"codigo": "K42.0",
+"descripcion": "Hernia umbilical con obstrucción, sin gangrena"
+},
+{
+"codigo": "K42.1",
+"descripcion": "Hernia umbilical con gangrena"
+},
+{
+"codigo": "K43.9",
+"descripcion": "Hernia ventral sin obstrucción ni gangrena"
+},
+{
+"codigo": "K43.2",
+"descripcion": "Hernia incisional (eventración) sin obstrucción ni gangrena"
+},
+{
+"codigo": "K43.0",
+"descripcion": "Hernia incisional con obstrucción, sin gangrena"
+},
+{
+"codigo": "K43.5",
+"descripcion": "Hernia paraestomal sin obstrucción ni gangrena"
+},
+{
+"codigo": "K43.6",
+"descripcion": "Otras hernias ventrales con obstrucción (incl. epigástrica, Spiegel)"
+},
+{
+"codigo": "K43.9",
+"descripcion": "Hernia epigástrica / de Spiegel sin obstrucción ni gangrena"
+},
+{
+"codigo": "K44.9",
+"descripcion": "Hernia diafragmática (hiatal) sin obstrucción ni gangrena"
+},
+{
+"codigo": "K44.0",
+"descripcion": "Hernia diafragmática con obstrucción, sin gangrena"
+},
+{
+"codigo": "K45.8",
+"descripcion": "Otras hernias abdominales especificadas (lumbar, obturatriz)"
+},
+{
+"codigo": "K46.9",
+"descripcion": "Hernia abdominal no especificada"
+},
+{
+"codigo": "M62.0",
+"descripcion": "Diástasis de músculos (diástasis de rectos)"
+},
+{
+"codigo": "K80.2",
+"descripcion": "Cálculo de la vesícula biliar sin colecistitis (colelitiasis)"
+},
+{
+"codigo": "K80.0",
+"descripcion": "Cálculo de la vesícula biliar con colecistitis aguda"
+},
+{
+"codigo": "K80.1",
+"descripcion": "Cálculo de la vesícula biliar con otra colecistitis (crónica)"
+},
+{
+"codigo": "K80.5",
+"descripcion": "Cálculo de conducto biliar sin colangitis ni colecistitis (coledocolitiasis)"
+},
+{
+"codigo": "K80.3",
+"descripcion": "Cálculo de conducto biliar con colangitis"
+},
+{
+"codigo": "K80.4",
+"descripcion": "Cálculo de conducto biliar con colecistitis"
+},
+{
+"codigo": "K81.0",
+"descripcion": "Colecistitis aguda"
+},
+{
+"codigo": "K81.1",
+"descripcion": "Colecistitis crónica"
+},
+{
+"codigo": "K82.1",
+"descripcion": "Hidropesía de la vesícula biliar"
+},
+{
+"codigo": "K82.2",
+"descripcion": "Perforación de la vesícula biliar"
+},
+{
+"codigo": "K82.4",
+"descripcion": "Colesterolosis de la vesícula biliar"
+},
+{
+"codigo": "K82.8",
+"descripcion": "Pólipo vesicular / otras enfermedades de la vesícula"
+},
+{
+"codigo": "K83.0",
+"descripcion": "Colangitis"
+},
+{
+"codigo": "K83.1",
+"descripcion": "Obstrucción del conducto biliar"
+},
+{
+"codigo": "K85.1",
+"descripcion": "Pancreatitis aguda de origen biliar"
+},
+{
+"codigo": "K86.3",
+"descripcion": "Pseudoquiste del páncreas"
+},
+{
+"codigo": "K35.8",
+"descripcion": "Apendicitis aguda, otra y la no especificada"
+},
+{
+"codigo": "K35.2",
+"descripcion": "Apendicitis aguda con peritonitis generalizada"
+},
+{
+"codigo": "K35.3",
+"descripcion": "Apendicitis aguda con peritonitis localizada"
+},
+{
+"codigo": "K36",
+"descripcion": "Otros tipos de apendicitis"
+},
+{
+"codigo": "K37",
+"descripcion": "Apendicitis no especificada"
+},
+{
+"codigo": "K21.0",
+"descripcion": "Enfermedad por reflujo gastroesofágico con esofagitis"
+},
+{
+"codigo": "K21.9",
+"descripcion": "Enfermedad por reflujo gastroesofágico sin esofagitis"
+},
+{
+"codigo": "K22.0",
+"descripcion": "Acalasia del cardias"
+},
+{
+"codigo": "K22.5",
+"descripcion": "Divertículo del esófago, adquirido"
+},
+{
+"codigo": "K25.5",
+"descripcion": "Úlcera gástrica crónica o no especificada con perforación"
+},
+{
+"codigo": "K26.5",
+"descripcion": "Úlcera duodenal crónica o no especificada con perforación"
+},
+{
+"codigo": "K31.1",
+"descripcion": "Estenosis pilórica hipertrófica del adulto"
+},
+{
+"codigo": "C16.9",
+"descripcion": "Tumor maligno del estómago, parte no especificada"
+},
+{
+"codigo": "D13.1",
+"descripcion": "Tumor benigno del estómago"
+},
+{
+"codigo": "E66.0",
+"descripcion": "Obesidad debida a exceso de calorías"
+},
+{
+"codigo": "E66.8",
+"descripcion": "Otros tipos de obesidad (obesidad mórbida)"
+},
+{
+"codigo": "E66.9",
+"descripcion": "Obesidad no especificada"
+},
+{
+"codigo": "K56.5",
+"descripcion": "Adherencias intestinales con obstrucción (bridas)"
+},
+{
+"codigo": "K56.6",
+"descripcion": "Otras obstrucciones intestinales y las no especificadas"
+},
+{
+"codigo": "K56.7",
+"descripcion": "Íleo, no especificado"
+},
+{
+"codigo": "K57.3",
+"descripcion": "Enfermedad diverticular del intestino grueso sin perforación ni absceso"
+},
+{
+"codigo": "K57.2",
+"descripcion": "Enfermedad diverticular del intestino grueso con perforación y absceso"
+},
+{
+"codigo": "K63.1",
+"descripcion": "Perforación del intestino (no traumática)"
+},
+{
+"codigo": "K65.0",
+"descripcion": "Peritonitis aguda"
+},
+{
+"codigo": "K66.0",
+"descripcion": "Adherencias peritoneales"
+},
+{
+"codigo": "C18.9",
+"descripcion": "Tumor maligno del colon, parte no especificada"
+},
+{
+"codigo": "C18.7",
+"descripcion": "Tumor maligno del colon sigmoide"
+},
+{
+"codigo": "C18.2",
+"descripcion": "Tumor maligno del colon ascendente"
+},
+{
+"codigo": "C19",
+"descripcion": "Tumor maligno de la unión rectosigmoidea"
+},
+{
+"codigo": "C20",
+"descripcion": "Tumor maligno del recto"
+},
+{
+"codigo": "D12.6",
+"descripcion": "Tumor benigno del colon (pólipo), parte no especificada"
+},
+{
+"codigo": "K62.1",
+"descripcion": "Pólipo del recto"
+},
+{
+"codigo": "K62.3",
+"descripcion": "Prolapso rectal"
+},
+{
+"codigo": "K92.2",
+"descripcion": "Hemorragia gastrointestinal, no especificada"
+},
+{
+"codigo": "Z43.3",
+"descripcion": "Atención de colostomía (cierre / reconstrucción del tránsito)"
+},
+{
+"codigo": "Z43.2",
+"descripcion": "Atención de ileostomía"
+},
+{
+"codigo": "K64.0",
+"descripcion": "Hemorroides de primer grado"
+},
+{
+"codigo": "K64.1",
+"descripcion": "Hemorroides de segundo grado"
+},
+{
+"codigo": "K64.2",
+"descripcion": "Hemorroides de tercer grado"
+},
+{
+"codigo": "K64.3",
+"descripcion": "Hemorroides de cuarto grado"
+},
+{
+"codigo": "K64.5",
+"descripcion": "Trombosis hemorroidal (hemorroide externa trombosada)"
+},
+{
+"codigo": "K60.2",
+"descripcion": "Fisura anal, no especificada"
+},
+{
+"codigo": "K60.1",
+"descripcion": "Fisura anal crónica"
+},
+{
+"codigo": "K60.3",
+"descripcion": "Fístula anal"
+},
+{
+"codigo": "K61.0",
+"descripcion": "Absceso anal"
+},
+{
+"codigo": "K61.1",
+"descripcion": "Absceso rectal / perirrectal"
+},
+{
+"codigo": "L05.0",
+"descripcion": "Quiste pilonidal con absceso"
+},
+{
+"codigo": "L05.9",
+"descripcion": "Quiste pilonidal sin absceso"
+},
+{
+"codigo": "D17.9",
+"descripcion": "Tumor benigno lipomatoso (lipoma), de sitio no especificado"
+},
+{
+"codigo": "D17.1",
+"descripcion": "Lipoma de piel y tejido subcutáneo del tronco"
+},
+{
+"codigo": "L72.1",
+"descripcion": "Quiste triquilemal (quiste sebáceo)"
+},
+{
+"codigo": "L72.0",
+"descripcion": "Quiste epidérmico"
+},
+{
+"codigo": "L02.9",
+"descripcion": "Absceso cutáneo, furúnculo y ántrax, de sitio no especificado"
+},
+{
+"codigo": "L03.9",
+"descripcion": "Celulitis, de sitio no especificado"
+},
+{
+"codigo": "L60.0",
+"descripcion": "Uña encarnada"
+},
+{
+"codigo": "D23.9",
+"descripcion": "Tumor benigno de la piel, de sitio no especificado"
+},
+{
+"codigo": "C44.9",
+"descripcion": "Tumor maligno de la piel, sitio no especificado"
+},
+{
+"codigo": "R59.0",
+"descripcion": "Adenomegalia localizada"
+},
+{
+"codigo": "E04.1",
+"descripcion": "Nódulo tiroideo solitario no tóxico"
+},
+{
+"codigo": "E04.2",
+"descripcion": "Bocio multinodular no tóxico"
+},
+{
+"codigo": "E05.0",
+"descripcion": "Tirotoxicosis con bocio difuso (Graves)"
+},
+{
+"codigo": "E05.2",
+"descripcion": "Tirotoxicosis con bocio multinodular tóxico"
+},
+{
+"codigo": "C73",
+"descripcion": "Tumor maligno de la glándula tiroides"
+},
+{
+"codigo": "D34",
+"descripcion": "Tumor benigno de la glándula tiroides"
+},
+{
+"codigo": "E21.0",
+"descripcion": "Hiperparatiroidismo primario"
+},
+{
+"codigo": "N60.1",
+"descripcion": "Mastopatía quística difusa"
+},
+{
+"codigo": "N63",
+"descripcion": "Masa no especificada en la mama (nódulo mamario)"
+},
+{
+"codigo": "D24",
+"descripcion": "Tumor benigno de la mama (fibroadenoma)"
+},
+{
+"codigo": "C50.9",
+"descripcion": "Tumor maligno de la mama, parte no especificada"
+},
+{
+"codigo": "N61",
+"descripcion": "Trastornos inflamatorios de la mama (absceso mamario)"
+},
+{
+"codigo": "N62",
+"descripcion": "Hipertrofia de la mama / ginecomastia"
+},
+{
+"codigo": "K76.8",
+"descripcion": "Quiste hepático / otras enfermedades del hígado"
+},
+{
+"codigo": "B67.0",
+"descripcion": "Equinococosis del hígado (quiste hidatídico)"
+},
+{
+"codigo": "C22.0",
+"descripcion": "Carcinoma de células hepáticas"
+},
+{
+"codigo": "C78.7",
+"descripcion": "Tumor maligno secundario del hígado"
+},
+{
+"codigo": "D73.5",
+"descripcion": "Infarto / quiste del bazo"
+},
+{
+"codigo": "I83.9",
+"descripcion": "Várices de los miembros inferiores sin úlcera ni inflamación"
+},
+{
+"codigo": "R10.4",
+"descripcion": "Otros dolores abdominales y los no especificados"
+},
+{
+"codigo": "R19.0",
+"descripcion": "Tumefacción, masa o prominencia intraabdominal y pélvica"
+},
+{
+"codigo": "Z01.8",
+"descripcion": "Examen prequirúrgico (otros exámenes especiales especificados)"
+},
+{
+"codigo": "Z09.0",
+"descripcion": "Control posterior a cirugía"
+}
+]
+}

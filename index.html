@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f3a5f">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https://www.googleapis.com; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Pedidos</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icono.svg">
+<link rel="apple-touch-icon" href="icono-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+<header>
+  <div class="marca"><img src="logo-quiron.svg" alt="Quirón">
+    <div style="min-width:0"><h1 id="titulo">Pedidos</h1><small id="sync" style="opacity:.8;font-size:11px"></small></div></div>
+  <button id="subir-ahora" class="boton chico" style="background:var(--oro);color:#1d2329;border-color:var(--oro)" hidden>Subir a Drive</button>
+  <button id="bloquear" class="boton chico secundario" style="background:transparent;color:inherit;border-color:currentColor" title="Bloquear" hidden>🔒</button>
+</header>
+
+<main>
+  <!-- PIN: crear (primera vez) y desbloquear -->
+  <section id="v-pin" hidden>
+    <form class="card" id="form-pin" style="text-align:center" autocomplete="off">
+      <img src="icono-192.png" alt="" width="64" height="64">
+      <h2 id="pin-titulo">Desbloquear</h2>
+      <p class="ayuda" id="pin-ayuda"></p>
+      <input id="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="12" autocomplete="off" placeholder="PIN"
+        style="text-align:center;font-size:24px;letter-spacing:6px">
+      <input id="pin2" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="12" autocomplete="off" placeholder="Repetí el PIN"
+        style="text-align:center;font-size:24px;letter-spacing:6px;margin-top:8px" hidden>
+      <button class="boton" type="submit" style="width:100%;margin-top:12px" id="pin-ok">Entrar</button>
+      <div id="pin-error" class="alerta error" style="margin-top:10px" hidden></div>
+      <p class="ayuda"><a href="#" id="olvide-pin">Olvidé mi PIN</a></p>
+    </form>
+  </section>
+
+  <!-- Primera vez: ingresar con Google -->
+  <section id="v-bienvenida" hidden>
+    <div class="card" style="text-align:center">
+      <img src="icono-192.png" alt="" width="72" height="72">
+      <h2>Pedidos</h2>
+      <p class="ayuda">Pedidos de estudios, materiales, autorizaciones, resumen de HC y recetas en tu recetario, listos para mandar por WhatsApp.
+        Tus datos quedan en <b>tu</b> Google Drive (carpeta «Pedidos») y en cada dispositivo donde entres con tu cuenta; nadie más los ve.</p>
+      <div class="alerta" id="bienvenida-aviso" hidden></div>
+      <button class="boton" id="conectar-inicio" style="width:100%">Ingresar con Google</button>
+      <p class="ayuda">Después vas a crear (o ingresar) tu PIN, que protege los datos en este dispositivo.</p>
+      <p class="ayuda" style="font-size:12px">o <a href="#" id="sin-drive">usar sin cuenta</a> (no recomendado: los datos quedan solo en este dispositivo)</p>
+    </div>
+  </section>
+
+  <!-- ===================== NUEVO PEDIDO ===================== -->
+  <section id="v-nuevo" hidden>
+    <div class="alerta" id="falta-perfil" hidden>Antes del primer pedido, cargá <b>tu recetario</b> (nombre, matrícula, firma): <a href="#" data-ir="config">ir a Configuración</a>.</div>
+    <div class="card">
+      <h2>1. Leer documentos <small class="opcional">(opcional)</small></h2>
+      <p class="ayuda">Credencial, DNI, orden o captura de la HC. Se leen <b>dentro de este dispositivo</b> (nada sale de acá) y completan los datos; revisalos contra el original.</p>
+      <div class="fila">
+        <label class="boton secundario">📷 Sacar foto<input type="file" id="in-camara" accept="image/*" capture="environment" hidden></label>
+        <label class="boton secundario">📎 Elegir archivos<input type="file" id="in-archivos" accept="image/*,application/pdf" multiple hidden></label>
+      </div>
+      <div id="miniaturas"></div>
+      <button id="btn-extraer" class="boton" disabled>Leer datos</button>
+      <div id="estado-extraccion"></div>
+    </div>
+
+    <div class="card">
+      <h2>2. Paciente</h2>
+      <div id="dudas"></div>
+      <div class="grid">
+        <label>Apellido<input data-campo="paciente.apellido" autocomplete="off"></label>
+        <label>Nombre<input data-campo="paciente.nombre" autocomplete="off"></label>
+        <label>DNI<input data-campo="paciente.dni" inputmode="numeric" autocomplete="off"></label>
+        <label>F. nacimiento<input data-campo="paciente.fecha_nacimiento" placeholder="DD/MM/AAAA" inputmode="numeric" autocomplete="off"></label>
+        <label>Obra social<input data-campo="cobertura.obra_social" list="lista-os" autocomplete="off"></label>
+        <label>N° afiliado / beneficio<input data-campo="cobertura.nro_afiliado" autocomplete="off"></label>
+        <label>Teléfono (WhatsApp)<input data-campo="paciente.telefono" inputmode="tel" autocomplete="off"></label>
+        <label>Email<input data-campo="paciente.email" type="email" autocomplete="off"></label>
+      </div>
+      <datalist id="lista-os"><option>PAMI</option><option>APROSS</option><option>OSDE</option><option>Swiss Medical</option><option>Galeno</option><option>Sancor Salud</option><option>Particular</option></datalist>
+    </div>
+
+    <div class="card">
+      <h2>3. Diagnóstico y procedimiento</h2>
+      <div class="grid">
+        <label class="ancho">Diagnóstico
+          <div class="auto"><input data-campo="clinica.diagnostico" id="in-diagnostico" placeholder="Escribí para buscar el código CIE-10" autocomplete="off"></div>
+        </label>
+        <label>CIE-10<input data-campo="clinica.cie10" autocomplete="off"></label>
+        <label class="ancho">Procedimiento
+          <div class="auto"><input data-campo="clinica.procedimiento" id="in-procedimiento" placeholder="Escribí o buscá en los módulos PAMI" autocomplete="off"></div>
+        </label>
+        <label>Lateralidad<select data-campo="clinica.lateralidad"><option></option><option>Derecha</option><option>Izquierda</option><option>Bilateral</option></select></label>
+        <label>Carácter<select data-campo="clinica.caracter"><option></option><option>Programada</option><option>Urgencia</option></select></label>
+        <label>Fecha probable<input data-campo="autorizacion.fecha_probable" placeholder="DD/MM/AAAA" autocomplete="off"></label>
+      </div>
+      <details id="det-resumen" class="avanzado"><summary>Resumen de historia clínica <span class="ayuda">para mandar si lo piden</span></summary>
+        <p class="ayuda">Al leer la HC (paso 1) se redacta solo, con motivo de consulta, antecedentes, examen, estudios, diagnóstico y cirugía (sin IA: es una plantilla). Revisalo y corregilo; se genera con el botón «Resumen HC».</p>
+        <button class="boton chico secundario" id="btn-armar-resumen">Armar resumen con los datos cargados</button>
+        <div class="grid">
+          <label class="ancho">Resumen clínico<textarea data-campo="autorizacion.fundamento" rows="5"></textarea></label>
+          <label class="ancho">Resumen de estudios<textarea data-campo="autorizacion.resumen_estudios" rows="2"></textarea></label>
+        </div>
+      </details>
+    </div>
+
+    <div class="card">
+      <h2>4. Estudios / prequirúrgicos</h2>
+      <div class="fila">
+        <select id="sel-combo" style="flex:1;min-width:160px"><option value="">— cargar combo —</option></select>
+        <button class="boton chico secundario" id="btn-guardar-combo">Guardar como combo</button>
+        <button class="boton chico peligro" id="btn-borrar-combo" hidden>Borrar combo</button>
+      </div>
+      <table class="editable" id="tabla-estudios"><thead><tr><th>Código</th><th>Estudio</th><th></th></tr></thead><tbody></tbody></table>
+      <div class="auto"><input id="in-practica" placeholder="+ Agregar del nomenclador PAMI (ej.: glucemia, radiografía tórax)" autocomplete="off"></div>
+    </div>
+
+    <div class="card">
+      <h2>5. Materiales</h2>
+      <label>Kit<select id="sel-kit"><option value="">— elegir kit —</option></select></label>
+      <div id="aviso-kit"></div>
+      <table class="editable" id="tabla-materiales"><thead><tr><th>Cant.</th><th>Descripción</th><th></th></tr></thead><tbody></tbody></table>
+      <button class="boton chico secundario" id="btn-agregar-material">+ Agregar material</button>
+    </div>
+
+    <div class="card">
+      <h2>6. Medicamentos</h2>
+      <div id="lista-medicamentos"></div>
+      <button class="boton chico secundario" id="btn-agregar-medicamento">+ Agregar medicamento</button>
+    </div>
+
+    <div class="card">
+      <h2>7. Generar y enviar</h2>
+      <div class="grid">
+        <label>Recetario<select id="sel-membrete">
+          <option value="personal">Personal</option>
+          <option value="institucional" id="opt-institucion">Institución</option>
+        </select>
+        <small id="aviso-membrete" class="aviso-membrete"></small></label>
+        <label class="check"><input type="checkbox" id="chk-codigos"> Mostrar códigos en el pedido de estudios</label>
+      </div>
+      <label>Observaciones<textarea data-campo="observaciones" rows="2"></textarea></label>
+      <div class="fila generar">
+        <button class="boton" data-generar="estudios">Estudios</button>
+        <button class="boton" data-generar="materiales">Materiales</button>
+        <button class="boton" data-generar="autorizacion">Autorización</button>
+        <button class="boton" data-generar="resumen">Resumen HC</button>
+        <button class="boton" data-generar="receta">Receta</button>
+      </div>
+      <div id="resultado" hidden>
+        <p id="resultado-titulo"></p>
+        <img id="vista-previa" alt="Vista previa del recetario">
+        <div class="fila">
+          <button class="boton" id="btn-compartir">Compartir PDF…</button>
+          <button class="boton secundario" id="btn-compartir-imagen">Compartir imagen…</button>
+          <button class="boton secundario" id="btn-copiar-imagen">Copiar como imagen</button>
+          <a class="boton secundario" id="btn-whatsapp" target="_blank" rel="noopener">WhatsApp</a>
+          <a class="boton secundario" id="btn-ver">Descargar PDF</a>
+          <button class="boton secundario" id="btn-descargar-imagen">Descargar imagen</button>
+          <a class="boton secundario" id="btn-email">Email</a>
+          <button class="boton secundario" id="btn-copiar">Copiar texto</button>
+        </div>
+        <p class="ayuda" id="ayuda-compartir"></p>
+        <p class="ayuda" id="estado-guardado"></p>
+        <div id="panel-carga" hidden>
+          <h3 id="carga-titulo"></h3>
+          <p class="ayuda" id="carga-ayuda"></p>
+          <div class="fila">
+            <button class="boton chico" id="btn-copiar-carga">Copiar todo</button>
+            <a class="boton chico secundario" id="btn-abrir-plataforma" target="_blank" rel="noopener">Abrir plataforma</a>
+          </div>
+          <div id="carga-filas"></div>
+        </div>
+        <details><summary>Texto del mensaje</summary><pre id="texto-plano"></pre></details>
+      </div>
+      <hr>
+      <button class="boton peligro" id="btn-limpiar">Nuevo paciente (borrar todo)</button>
+    </div>
+  </section>
+
+  <!-- ===================== PACIENTES ===================== -->
+  <section id="v-pacientes" hidden>
+    <div class="card">
+      <h2>Pacientes</h2>
+      <p class="ayuda">Cada pedido que generás queda guardado acá (y el PDF en tu Drive, carpeta «Pedidos › Pacientes»). Buscá por apellido o DNI.</p>
+      <input id="in-buscar-paciente" type="search" placeholder="🔎 Apellido o DNI" autocomplete="off">
+      <div id="lista-pacientes"></div>
+    </div>
+    <div class="card" id="ficha-paciente" hidden></div>
+  </section>
+
+  <!-- ===================== KITS ===================== -->
+  <section id="v-kits" hidden>
+    <div class="card">
+      <h2>Kits de materiales</h2>
+      <p class="ayuda">Los kits marcados <span class="badge">BORRADOR</span> vienen precargados: revisalos y validalos.</p>
+      <button class="boton chico" id="btn-nuevo-kit">+ Nuevo kit</button>
+      <div id="lista-kits"></div>
+    </div>
+    <div class="card" id="editor-kit" hidden>
+      <h2 id="editor-kit-titulo">Editar kit</h2>
+      <div class="grid">
+        <label>Categoría<input id="kit-categoria" list="lista-categorias"></label>
+        <label class="ancho">Nombre<input id="kit-nombre"></label>
+      </div>
+      <datalist id="lista-categorias"></datalist>
+      <table class="editable" id="tabla-kit"><thead><tr><th>Cant.</th><th>Descripción</th><th></th></tr></thead><tbody></tbody></table>
+      <button class="boton chico secundario" id="btn-kit-agregar">+ Agregar ítem</button>
+      <label>Notas<textarea id="kit-notas" rows="2"></textarea></label>
+      <label class="check"><input type="checkbox" id="kit-validado"> Validado (quita la marca de borrador)</label>
+      <div class="fila">
+        <button class="boton" id="btn-kit-guardar">Guardar</button>
+        <button class="boton secundario" id="btn-kit-cancelar">Cancelar</button>
+        <button class="boton peligro" id="btn-kit-borrar">Borrar kit</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== CONFIGURACIÓN ===================== -->
+  <section id="v-config" hidden>
+    <div class="card">
+      <h2>Tu recetario</h2>
+      <p class="ayuda">Se usa para las obras sociales que no van por la institución. Logo y firma se guardan en tu Drive, no en la app.</p>
+      <div class="grid">
+        <label>Título<input data-medico="titulo" placeholder="Dr."></label>
+        <label>Nombre<input data-medico="nombre"></label>
+        <label>Apellido<input data-medico="apellido"></label>
+        <label>Especialidad<input data-medico="especialidad"></label>
+        <label class="ancho">Subtítulo del encabezado<input data-medico="subtitulo" placeholder="(si lo dejás vacío va la especialidad)"></label>
+        <label>M.P.<input data-medico="mp"></label>
+        <label>M.E.<input data-medico="me"></label>
+        <label>Dirección<input data-medico="direccion"></label>
+        <label>Teléfono<input data-medico="telefono"></label>
+        <label>Email<input data-medico="email"></label>
+        <label>Web<input data-medico="web"></label>
+        <label>Color principal<input type="color" data-medico="color_acento"></label>
+        <label>Color secundario<input type="color" data-medico="color_secundario"></label>
+      </div>
+      <div class="imagenes">
+        <div class="imagen" data-imagen="logo_personal" data-titulo="Logo"></div>
+        <div class="imagen" data-imagen="firma" data-titulo="Firma y sello"></div>
+      </div>
+      <button class="boton" id="btn-guardar-medico">Guardar</button>
+    </div>
+    <div class="card">
+      <h2>Recetario de la institución</h2>
+      <p class="ayuda">Los pacientes PAMI van siempre con este recetario. Para las demás obras sociales elegís en cada pedido. Si no usás uno, dejalo vacío.</p>
+      <div class="grid">
+        <label class="ancho">Nombre de la institución<input data-inst="nombre"></label>
+        <label class="ancho">Texto del pie<input data-inst="pie"></label>
+        <label>WhatsApp de secretaría<input data-inst="whatsapp_secretaria" inputmode="tel" placeholder="358 4xx xxxx"></label>
+        <label>Color principal<input type="color" data-inst="color_acento"></label>
+        <label>Color secundario<input type="color" data-inst="color_secundario"></label>
+      </div>
+      <div class="imagenes">
+        <div class="imagen" data-imagen="logo_institucion" data-titulo="Logo"></div>
+        <div class="imagen" data-imagen="insignia_institucion" data-titulo="Insignia del pie"></div>
+      </div>
+      <button class="boton" id="btn-guardar-inst">Guardar</button>
+    </div>
+    <div class="card">
+      <h2>Mi cuenta</h2>
+      <p id="cuenta-estado" class="ayuda"></p>
+      <div class="fila">
+        <button class="boton chico secundario" id="sincronizar">Sincronizar ahora</button>
+        <a class="boton chico secundario" id="abrir-drive" target="_blank" rel="noopener" hidden>Abrir la carpeta en Drive</a>
+        <button class="boton chico secundario" id="cambiar-pin">Cambiar PIN</button>
+      </div>
+      <label>Bloquear después de<select id="min-bloqueo"><option value="5">5 minutos sin uso</option><option value="15">15 minutos</option><option value="30">30 minutos</option><option value="60">1 hora</option><option value="240">4 horas</option></select></label>
+      <details class="avanzado"><summary>Copias, respaldos e importar</summary>
+        <p class="ayuda">Tu Drive guarda un respaldo por día (últimos 30). Recuperar devuelve lo que falta o se borró, sin cambiar lo que tenés hoy.</p>
+        <div class="fila"><button class="boton chico secundario" id="ver-respaldos">Ver respaldos del Drive</button></div>
+        <div id="respaldos"></div>
+        <div class="fila">
+          <button class="boton chico secundario" id="copia-bajar">Descargar copia cifrada</button>
+          <label class="boton chico secundario">Restaurar copia<input type="file" id="copia-subir" accept="application/json,.json" hidden></label>
+        </div>
+        <p class="ayuda">¿Usabas la versión de la PC? Importá su archivo de configuración (recetarios, firma, kits y combos). Lo que ya tengas acá no se borra.</p>
+        <label class="boton chico secundario" style="align-self:flex-start">Importar configuración de la PC<input type="file" id="importar-pc" accept="application/json,.json" hidden></label>
+        <div id="registro-drive"></div>
+      </details>
+      <hr>
+      <p class="ayuda"><span id="version-app"></span> · <a href="#" id="actualizar-app">Buscar actualización</a></p>
+      <button class="boton peligro chico" id="salir">Cerrar la cuenta en este dispositivo</button>
+    </div>
+  </section>
+</main>
+
+<nav class="abajo" id="nav" hidden>
+  <button data-vista="nuevo" class="activa"><span>📝</span>Nuevo</button>
+  <button data-vista="pacientes"><span>👥</span>Pacientes</button>
+  <button data-vista="kits"><span>🧰</span>Kits</button>
+  <button data-vista="config"><span>⚙️</span>Configuración</button>
+</nav>
+
+<div id="leyendo" hidden><div class="card"><p id="leyendo-texto" class="cargando">Leyendo…</p><p class="ayuda">La primera vez se descarga el lector (~27 MB, una sola vez).</p></div></div>
+<div id="toast" hidden></div>
+<script src="config.js"></script>
+<script src="almacen.js"></script>
+<script src="lector.js"></script>
+<script src="catalogos.js"></script>
+<script src="recetario.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
