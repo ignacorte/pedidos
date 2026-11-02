@@ -2,7 +2,7 @@
 // App: con conexión, siempre la versión publicada (la copia guardada es solo para cuando no hay señal). Librerías de
 // vendor/ (versión fija, ~27 MB): se descargan una sola vez, la primera vez que se lee un documento.
 // Nunca se guardan respuestas de Google (datos del profesional).
-const VERSION = "pedidos-v1"; // igual que VERSION_APP en app.js
+const VERSION = "pedidos-v2"; // igual que VERSION_APP en app.js
 const LIBRERIAS = "pedidos-libs-1"; // aparte: no se vuelve a bajar en cada actualización de la app
 const APP = ["./", "index.html", "estilos.css", "config.js", "almacen.js", "lector.js", "catalogos.js", "recetario.js", "app.js", "manifest.webmanifest",
   "icono.svg", "icono-192.png", "icono-512.png", "logo-quiron.svg", "datos/nomenclador_pami.json", "datos/pami_modulos_cirugia.json", "datos/cie10_cirugia.json", "datos/kits_iniciales.json"];

@@ -20,7 +20,19 @@ async function copiar(texto) { try { await navigator.clipboard.writeText(texto);
 const estado = { modoPin: "", archivos: [], ultimo: null, kitEditando: null, pedidoDe: {} };
 const datos = () => Almacen.doc;
 const ajuste = (k, def) => datos().ajustes[k]?.valor ?? def;
-const vivos = (col) => datos()[col].filter((x) => !x.borrada);
+const vivos = (col) => datos()[col].filter((x) => !x.borrada).map(completo[col] || ((x) => x));
+// Registros con campos de menos (copias viejas, importados): se completan para mostrarlos, sin tocar lo guardado
+const completo = {
+  pedidos: (o) => ({ ...o, titulo: o.titulo || "Pedido", fecha: o.fecha || "", datos: datosCompletos(o.datos) }),
+  kits: (k) => ({ ...k, categoria: k.categoria || "Sin categoría", nombre: k.nombre || "Sin nombre", items: Array.isArray(k.items) ? k.items : [] }),
+  combos: (c) => ({ ...c, nombre: c.nombre || "Sin nombre", items: Array.isArray(c.items) ? c.items : [] }),
+};
+function datosCompletos(d = {}) {
+  const g = (x) => (x && typeof x === "object" ? x : {});
+  return { ...d, paciente: g(d.paciente), cobertura: g(d.cobertura), clinica: g(d.clinica), autorizacion: g(d.autorizacion),
+    estudios: Array.isArray(d.estudios) ? d.estudios : [], materiales: Array.isArray(d.materiales) ? d.materiales : [],
+    medicamentos: Array.isArray(d.medicamentos) ? d.medicamentos : [] };
+}
 
 const MEDICO_VACIO = { titulo: "Dr.", nombre: "", apellido: "", especialidad: "Cirugía General", subtitulo: "", mp: "", me: "", direccion: "", telefono: "",
   email: "", web: "", color_acento: "#1f3a5f", color_secundario: "#b08d57" };
@@ -251,8 +263,8 @@ async function borrarCombo() {
 // dispositivos a la vez, no se duplican.
 async function sembrar() {
   if (ajuste("sembrado", false)) return;
-  if (!datos().kits.length) await Almacen.guardarVarios("kits", Catalogos.kitsIniciales.map((k) => ({ ...k, notas: "", borrador: true })));
-  if (!datos().combos.some((c) => c.id === Catalogos.PREQUIRURGICO.id)) await Almacen.guardar("combos", Catalogos.PREQUIRURGICO);
+  if (!datos().kits.length) await Almacen.sembrar("kits", Catalogos.kitsIniciales.map((k) => ({ ...k, notas: "", borrador: true })));
+  await Almacen.sembrar("combos", [Catalogos.PREQUIRURGICO]);
   await Almacen.ajuste("sembrado", true);
 }
 
@@ -359,9 +371,14 @@ async function generar(tipo, boton) {
     estado.ultimo = { tipo, datos: d, pdf, png, nombre: nombreArchivo(tipo, d), url: URL.createObjectURL(pdf), urlPng: URL.createObjectURL(png), texto: textoMensaje(tipo, d),
       membrete: inst ? p.institucion.nombre : "personal" };
     mostrarResultado(boton.textContent.replace(" ★", ""));
-    await guardarPedido(tipo, d, pdf);
   } catch (e) {
-    toast("No se pudo generar: " + e.message, 6000);
+    boton.disabled = false; boton.classList.remove("cargando");
+    return toast("No se pudo generar: " + e.message, 6000);
+  }
+  try {
+    await guardarPedido(tipo, d, estado.ultimo.pdf);
+  } catch (e) {
+    $("#estado-guardado").textContent = "⚠️ El documento está listo para mandar, pero no se pudo guardar en Pacientes: " + e.message;
   } finally {
     boton.disabled = false; boton.classList.remove("cargando");
   }
@@ -370,13 +387,15 @@ async function generar(tipo, boton) {
 // Cada documento queda en Pacientes (datos completos para repetirlo) y su PDF en el Drive. Generarlo otra vez en el mismo
 // formulario (por una corrección) reemplaza al anterior en vez de sumar uno nuevo.
 async function guardarPedido(tipo, d, pdf) {
-  const previo = estado.pedidoDe[tipo] && vivos("pedidos").find((x) => x.id === estado.pedidoDe[tipo]);
+  // (si en el mismo formulario se cambió de paciente, es un pedido nuevo: el del anterior no se toca)
+  const previo = estado.pedidoDe[tipo] && datos().pedidos.find((x) => x.id === estado.pedidoDe[tipo] && !x.borrada && clavePaciente(datosCompletos(x.datos)) === clavePaciente(d));
   const r = await Almacen.guardar("pedidos", { ...(previo || {}), fecha: hoy(), tipo, titulo: Recetario.TITULOS[tipo], datos: d });
   estado.pedidoDe[tipo] = r.id;
+  if (!Almacen.conectado()) { $("#estado-guardado").textContent = "✓ Guardado en Pacientes (en este dispositivo)."; return; }
   const ap = (d.paciente.apellido || "").toUpperCase(), carpeta = `${ap}${d.paciente.nombre ? ", " + d.paciente.nombre : ""}${d.paciente.dni ? " – DNI " + d.paciente.dni : ""}`;
   await Almacen.encolarAdjunto(r.id, `${hoy()} – ${Recetario.TITULOS[tipo]}.pdf`, pdf, ["Pacientes", hoy().slice(0, 4), carpeta.replace(/[\/\\]/g, "-")],
     [nombrePaciente(d), d.paciente.dni && "DNI " + d.paciente.dni, d.cobertura.obra_social, d.clinica.diagnostico, d.clinica.procedimiento].filter(Boolean).join(" · "));
-  $("#estado-guardado").textContent = Almacen.conectado() ? "✓ Guardado en Pacientes; el PDF se sube a tu Drive (Pedidos › Pacientes)." : "✓ Guardado en Pacientes (en este dispositivo).";
+  $("#estado-guardado").textContent = "✓ Guardado en Pacientes; el PDF se sube a tu Drive (Pedidos › Pacientes).";
 }
 
 function mostrarResultado(titulo) {
@@ -505,7 +524,8 @@ function verPacientes() {
     return `<div class="item" data-i="${i}"><span><strong>${esc(d.paciente.apellido)}${d.paciente.nombre ? ", " + esc(d.paciente.nombre) : ""}</strong>
       <span class="sub">DNI ${esc(d.paciente.dni || "—")} · ${esc(d.cobertura.obra_social || "sin obra social")}</span></span>
       <span class="sub">${esc(p.ultimo.titulo)} · ${fechaCorta(p.ultimo.fecha)}</span></div>`;
-  }).join("") : `<p class="ayuda">${q ? "No hay pacientes con ese apellido o DNI." : "Todavía no hay pedidos guardados."}</p>`;
+  }).join("") + (lista.length > 100 ? `<p class="ayuda">Y ${lista.length - 100} pacientes más: buscá por apellido o DNI.</p>` : "")
+    : `<p class="ayuda">${q ? "No hay pacientes con ese apellido o DNI." : "Todavía no hay pedidos guardados."}</p>`;
   $$("#lista-pacientes .item").forEach((el) => el.addEventListener("click", () => abrirFicha(lista[+el.dataset.i])));
 }
 function abrirFicha(p) {
@@ -630,22 +650,33 @@ async function importarConfiguracion(archivo) {
   try { c = JSON.parse(await archivo.text()); } catch { return toast("El archivo no es una configuración de Pedidos."); }
   if (c.app !== "pedidos-pc") return toast("El archivo no es una configuración de Pedidos (versión PC).");
   if (!confirm("¿Importar la configuración de la PC? Se cargan tus recetarios, firma, kits y combos. Los kits y combos que ya tengas acá se mantienen; los que tengan el mismo nombre se actualizan.")) return;
-  if (c.medico) await Almacen.ajuste("medico", { ...ajuste("medico", {}), ...Object.fromEntries(Object.entries(c.medico).filter(([, v]) => v)) });
-  if (c.institucion) await Almacen.ajuste("institucion", { ...ajuste("institucion", {}), ...Object.fromEntries(Object.entries(c.institucion).filter(([, v]) => v)) });
-  if (c.imagenes) {
-    const imgs = {};
-    for (const [nombre, src] of Object.entries(c.imagenes)) {
-      if (!(nombre in IMAGENES)) continue;
-      const img = await new Promise((ok, mal) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => mal(new Error("imagen dañada: " + nombre)); i.src = src; });
+  const porNombre = (col, x) => vivos(col).find((y) => y.id === x.id || y.nombre.toLowerCase() === String(x.nombre || "").toLowerCase());
+  const lista = (l) => (Array.isArray(l) ? l.filter((x) => x && x.nombre && Array.isArray(x.items)) : []);
+  const kits = lista(c.kits).map((k) => ({ ...k, categoria: k.categoria || "Sin categoría", id: porNombre("kits", k)?.id || k.id }));
+  const combos = lista(c.combos).map((k) => ({ ...k, id: porNombre("combos", k)?.id || k.id }));
+  if (kits.length) await Almacen.guardarVarios("kits", kits);
+  if (combos.length) await Almacen.guardarVarios("combos", combos);
+  const color = (x) => Object.fromEntries(Object.entries(x).filter(([k, v]) => v && (!k.startsWith("color") || /^#[0-9a-f]{6}$/i.test(v))));
+  if (c.medico) await Almacen.ajuste("medico", { ...ajuste("medico", {}), ...color(c.medico) });
+  if (c.institucion) await Almacen.ajuste("institucion", { ...ajuste("institucion", {}), ...color(c.institucion) });
+  const imgs = {}, fallidas = [];
+  for (const [nombre, src] of Object.entries(c.imagenes || {})) {
+    if (!(nombre in IMAGENES) || !String(src).startsWith("data:image/")) continue;
+    try {
+      const img = await new Promise((ok, mal) => { const i = new Image(); i.onload = () => ok(i); i.onerror = mal; i.src = src; });
       imgs[nombre] = await achicarImagen(img, IMAGENES[nombre]);
-    }
-    await Almacen.ajuste("imagenes", { ...perfil().imagenes, ...imgs });
+    } catch { fallidas.push(nombre); }
   }
-  const porNombre = (col, x) => vivos(col).find((y) => y.id === x.id || y.nombre.toLowerCase() === x.nombre.toLowerCase());
-  if (c.kits?.length) await Almacen.guardarVarios("kits", c.kits.map((k) => ({ ...k, id: porNombre("kits", k)?.id || k.id })));
-  if (c.combos?.length) await Almacen.guardarVarios("combos", c.combos.map((k) => ({ ...k, id: porNombre("combos", k)?.id || k.id })));
+  if (Object.keys(imgs).length) await Almacen.ajuste("imagenes", { ...perfil().imagenes, ...imgs });
   verConfig(); renderSelectorKits(); renderCombos(); actualizarMembrete();
-  toast(`Configuración importada: ${c.kits?.length || 0} kits, ${c.combos?.length || 0} combos, ${Object.keys(c.imagenes || {}).length} imágenes.`, 5000);
+  toast(`Configuración importada: ${kits.length} kits, ${combos.length} combos, ${Object.keys(imgs).length} imágenes.` +
+    (fallidas.length ? ` No se pudieron leer: ${fallidas.join(", ")} (subilas a mano).` : ""), 6000);
+}
+
+async function verOlvidados() {
+  const lista = await Almacen.olvidados();
+  $("#olvidados").innerHTML = lista.length ? lista.map((o) => `<div class="item" style="cursor:default"><span>Datos guardados el ${esc(o.fecha.toLocaleString("es-AR"))}</span>
+    <button class="boton chico secundario" data-olvidado="${esc(o.clave)}">Recuperar</button></div>`).join("") : '<p class="ayuda">No hay datos de un PIN anterior en este dispositivo.</p>';
 }
 
 async function verRespaldos() {
@@ -658,8 +689,11 @@ async function verRespaldos() {
 // ---------------- Cuenta, PIN, sincronización ----------------
 function conectar() { try { Almacen.conectar(); } catch (e) { toast(e.message); } }
 // Acceso de Google vencido (dura 1 h): se renueva sin pedir nada (va a Google y vuelve). false si no hay cuenta.
-function renovarAcceso() {
+const formularioOcupado = () => $$("[data-campo]").some((el) => el.value.trim()) && !estado.ultimo;
+function renovarAcceso({ preguntar = true } = {}) {
   if (!Almacen.cuenta) return false;
+  if (!navigator.onLine) { toast("Sin conexión: se sube a Google Drive cuando vuelva la señal."); return true; }
+  if (preguntar && formularioOcupado() && !confirm("Para conectar con Google Drive la app se recarga y se borra el pedido que estás cargando (todavía no lo generaste). ¿Seguir?")) return true;
   sessionStorage.setItem("ped_silencioso", "1");
   Almacen.conectar({ silencioso: true });
   return true;
@@ -708,12 +742,15 @@ function entrar() {
   entro = true;
   // Al entrar: traer lo cargado en otros dispositivos (kits, combos, perfil) y después sembrar lo inicial si hace falta
   const despues = () => sembrar().then(listo).catch((e) => toast(e.message));
-  if (Almacen.tieneToken()) Almacen.sincronizar().then(listo, (e) => toast(e.message)).finally(despues);
-  else { if (Almacen.doc.cuenta) mostrarSync("cambios sin subir"); despues(); }
+  if (Almacen.tieneToken()) Almacen.sincronizar().then(listo).then(despues, (e) => toast(e.message));
+  else if (Almacen.doc.cuenta) mostrarSync("cambios sin subir"); // los kits iniciales esperan a traer lo del Drive
+  else despues();
 }
 
 async function bloquearYa() {
   await Almacen.bloquear();
+  // Con un pedido a medio cargar se bloquea sin recargar: queda oculto detrás del PIN y vuelve al desbloquear
+  if (formularioOcupado()) return pedirPin("desbloquear");
   location.reload(); // no queda en memoria ni en pantalla ningún dato de pacientes
 }
 
@@ -751,14 +788,14 @@ function configurarSeguridad() {
   let ultima = Date.now();
   ["pointerdown", "keydown", "input"].forEach((e) => document.addEventListener(e, () => { ultima = Date.now(); Almacen.tocar(); }, { passive: true, capture: true }));
   const controlar = () => {
-    if (Almacen.tienePin() && !Almacen.bloqueada() && Date.now() - ultima > +ajuste("minutos_bloqueo", 15) * 60e3) bloquearYa();
+    if (Almacen.tienePin() && !Almacen.bloqueada() && Date.now() - ultima > +(Almacen.doc.ajustes.minutos_bloqueo?.valor ?? 15) * 60e3) bloquearYa();
   };
   setInterval(controlar, 15000);
   document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && controlar());
 }
 
 // ---------------- Actualizaciones de la app ----------------
-const VERSION_APP = "1"; // igual que VERSION en sw.js
+const VERSION_APP = "2"; // igual que VERSION en sw.js
 function registrarActualizaciones() {
   if (!("serviceWorker" in navigator)) return;
   const habia = !!navigator.serviceWorker.controller;
@@ -871,11 +908,20 @@ async function arrancar() {
     try { toast(`Copia restaurada: ${await Almacen.importarCopia(await a.text(), clave)} pedidos nuevos (lo que ya tenías se mantiene).`); renderSelectorKits(); renderCombos(); }
     catch (e) { toast(e.message); }
   });
+  $("#ver-olvidados").addEventListener("click", () => verOlvidados().catch((e) => toast(e.message)));
+  $("#olvidados").addEventListener("click", async (ev) => {
+    const b = ev.target.closest("[data-olvidado]");
+    if (!b) return;
+    const pin = prompt("PIN que usabas en ese momento:");
+    if (!pin) return;
+    try { toast(`Recuperado: ${await Almacen.recuperarOlvidado(b.dataset.olvidado, pin)} pedidos nuevos (lo que ya tenías se mantiene).`, 5000); renderSelectorKits(); renderCombos(); }
+    catch (e) { toast(e.message, 5000); }
+  });
   $("#importar-pc").addEventListener("change", (ev) => { const a = ev.target.files[0]; ev.target.value = ""; if (a) importarConfiguracion(a).catch((e) => toast(e.message)); });
   $("#actualizar-app").addEventListener("click", (ev) => { ev.preventDefault(); toast("Buscando la versión nueva…"); actualizarAhora(); });
   $("#salir").addEventListener("click", async () => {
     if (Almacen.pendiente && Almacen.cuenta) return toast("Hay cambios sin subir a Google Drive: tocá «Sincronizar ahora» antes de cerrar la cuenta.", 6000);
-    if (!Almacen.cuenta && !confirm("Sin Google Drive, cerrar la cuenta BORRA los datos de este dispositivo. ¿Seguro?")) return;
+    if (!Almacen.cuenta && !confirm("Sin Google Drive, tus datos quedan solo guardados en este dispositivo y se recuperan con tu PIN actual (Configuración › «Datos de un PIN anterior»). ¿Seguro?")) return;
     if (!confirm("¿Cerrar la cuenta en este dispositivo? Tus datos siguen en tu Google Drive.")) return;
     await Almacen.desconectar();
     location.reload();
@@ -902,7 +948,7 @@ async function arrancar() {
   }
   if (!cuenta && !vuelta?.ok && !local) return bienvenida();
   // 2) Acceso a Drive vencido (dura 1 hora): renovarlo sin pedir nada, antes del PIN. Una vez por apertura.
-  if (cuenta && !vuelta?.ok && Almacen.accesoVencido() && !sessionStorage.getItem("ped_silencioso")) return renovarAcceso();
+  if (cuenta && !vuelta?.ok && Almacen.accesoVencido() && navigator.onLine && !sessionStorage.getItem("ped_silencioso")) return renovarAcceso({ preguntar: false });
   sessionStorage.removeItem("ped_silencioso");
   // 3) PIN
   if (Almacen.tienePin()) return Almacen.bloqueada() ? pedirPin("desbloquear") : entrar();

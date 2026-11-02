@@ -70,11 +70,14 @@ const Almacen = (() => {
   const bloqueada = () => tienePin() && !llave;
 
   async function crearPin(pin) {
+    // Los PDF pendientes de subir están cifrados con la llave anterior: se leen antes de cambiarla y se vuelven a cifrar
+    if (llave) await leerAdjuntos();
     const sal = crypto.getRandomValues(new Uint8Array(16));
     llave = await derivar(pin, sal, ITERACIONES);
     meta = { sal, iteraciones: ITERACIONES, verificador: await cifrar(PRUEBA) };
     await idbEscribir({ pin: meta });
     await escribirLocal();
+    if (adjuntos) await guardarAdjuntos();
     await guardarSesion();
     if (tokenMem) await guardarToken();
   }
@@ -118,10 +121,28 @@ const Almacen = (() => {
   // Olvidó el PIN: lo de este celular no se puede abrir; se guarda aparte (no se destruye) y la copia de Drive queda
   async function olvidePin() {
     await bloquear();
-    const viejo = await idbLeer(CLAVE);
-    if (viejo) await idbEscribir({ ["olvidado_" + Date.now()]: viejo });
+    const viejo = await idbLeer(CLAVE), pendientes = await idbLeer("adjuntos");
+    if (viejo || pendientes) await idbEscribir({ ["olvidado_" + Date.now()]: { datos: viejo, adjuntos: pendientes, pin: meta } });
     meta = null;
-    await idbEscribir({ [CLAVE]: undefined, pin: undefined, token: undefined, fallos: undefined, sesion: undefined, pendiente: undefined, adjuntos: undefined });
+    await idbEscribir({ [CLAVE]: undefined, pin: undefined, token: undefined, token_vence: undefined, fallos: undefined, sesion: undefined, pendiente: undefined, adjuntos: undefined });
+  }
+  // Datos de un PIN anterior («Olvidé mi PIN» o «Cerrar cuenta»): con ese PIN se abren y se suman a lo de hoy (no se pisa nada)
+  async function olvidados() {
+    const db = await idb();
+    const claves = await new Promise((ok) => { const r = db.transaction(STORE).objectStore(STORE).getAllKeys(); r.onsuccess = () => ok(r.result); r.onerror = () => ok([]); });
+    return claves.filter((k) => String(k).startsWith("olvidado_")).map((k) => ({ clave: k, fecha: new Date(+String(k).slice(9)) }));
+  }
+  async function recuperarOlvidado(clave, pin) {
+    const c = await idbLeer(clave);
+    if (!c?.pin) throw new Error("Esa copia es de una versión anterior y no se puede abrir.");
+    const k = await derivar(pin, c.pin.sal, c.pin.iteraciones);
+    try { if ((await descifrar(c.pin.verificador, k)) !== PRUEBA) throw new Error(); } catch { throw new Error("Ese no es el PIN de esa copia."); }
+    const antes = doc.pedidos.length;
+    if (c.datos) doc = combinar(doc, c.datos.iv ? await descifrar(c.datos, k) : c.datos);
+    if (c.adjuntos) { await leerAdjuntos(); adjuntos.push(...await descifrar(c.adjuntos, k)); await guardarAdjuntos(); }
+    cambios++;
+    await confirmar();
+    return doc.pedidos.length - antes;
   }
 
   // ---------- Copia de seguridad (archivo cifrado con una clave propia: sirve en otro celular) ----------
@@ -211,6 +232,13 @@ const Almacen = (() => {
       const i = doc[coleccion].findIndex((x) => x.id === r.id);
       if (i >= 0) doc[coleccion][i] = r; else doc[coleccion].push(r);
     }
+    cambios++;
+    await confirmar();
+  }
+  // Registros iniciales (kits precargados): solo los que faltan, con fecha mínima: nunca le ganan a una versión editada o
+  // borrada en otro dispositivo
+  async function sembrar(coleccion, registros) {
+    for (const r of registros) if (!doc[coleccion].some((x) => x.id === r.id)) doc[coleccion].push({ ...r, actualizado: 1 });
     cambios++;
     await confirmar();
   }
@@ -311,11 +339,13 @@ const Almacen = (() => {
   const comillas = (t) => String(t).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
   const API = "https://www.googleapis.com/drive/v3/files", SUBIR = "https://www.googleapis.com/upload/drive/v3/files";
 
-  async function buscar(nombre, tipo) {
+  // El más antiguo primero: si hubiera dos con el mismo nombre, siempre se usa el mismo
+  async function buscarTodos(nombre, tipo) {
     const q = `name='${comillas(nombre)}' and trashed=false` + (tipo ? ` and mimeType='${tipo}'` : "");
-    const r = await (await drive(`${API}?q=${encodeURIComponent(q)}&fields=files(id,modifiedTime)&spaces=drive`)).json();
-    return r.files[0] || null;
+    const r = await (await drive(`${API}?q=${encodeURIComponent(q)}&fields=files(id,modifiedTime,createdTime)&spaces=drive&orderBy=createdTime`)).json();
+    return r.files || [];
   }
+  const buscar = async (nombre, tipo) => (await buscarTodos(nombre, tipo))[0] || null;
   async function carpeta() {
     const tipo = "application/vnd.google-apps.folder";
     const c = await buscar(CARPETA, tipo);
@@ -406,11 +436,17 @@ const Almacen = (() => {
         }
         if (cuentaPlano !== doc.cuenta) { cuentaPlano = doc.cuenta; await idbEscribir({ cuenta: doc.cuenta }); }
         const cambiosAlEmpezar = cambios;
-        const archivo = await buscar(ARCHIVO);
-        if (archivo) {
+        const archivos = await buscarTodos(ARCHIVO);
+        if (archivos.length) {
+          const archivo = archivos[0];
           await respaldoDiario(archivo).catch(() => {});
-          const remoto = await (await drive(`${API}/${archivo.id}?alt=media`)).json();
-          doc = combinar(doc, remoto);
+          // Si otro dispositivo lo cambió mientras se leía, se vuelve a leer y unir (hasta 3 veces) antes de subir
+          for (let vuelta = 0; ; vuelta++) {
+            const antes = (await (await drive(`${API}/${archivo.id}?fields=modifiedTime`)).json()).modifiedTime;
+            for (const a of archivos) doc = combinar(doc, await (await drive(`${API}/${a.id}?alt=media`)).json());
+            const ahora = (await (await drive(`${API}/${archivo.id}?fields=modifiedTime`)).json()).modifiedTime;
+            if (ahora === antes || vuelta >= 2) break;
+          }
           await drive(`${SUBIR}/${archivo.id}?uploadType=media`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(doc) });
         } else {
           await subirArchivo(ARCHIVO, new Blob([JSON.stringify(doc)], { type: "application/json" }), await carpeta());
@@ -421,7 +457,7 @@ const Almacen = (() => {
         doc.ultima_sync = Date.now();
         await escribirLocal();
         // Si hubo cambios mientras se subía, falta otra vuelta
-        if (cambios === cambiosAlEmpezar && !(adjuntos || []).length) { await marcarPendiente(false); avisar("al día"); }
+        if (cambios === cambiosAlEmpezar && adjuntos && !adjuntos.length && !errorAdjuntos) { await marcarPendiente(false); avisar("al día"); }
         else if (cambios === cambiosAlEmpezar) avisar("documentos sin subir");
         else { avisar("sincronizando…"); setTimeout(() => sincronizar().catch(() => {}), 500); }
       } catch (e) {
@@ -437,7 +473,16 @@ const Almacen = (() => {
   // «Pedidos/Pacientes/<año>/<APELLIDO, Nombre – DNI>/<fecha – Documento>.pdf»; al subirse, el enlace queda en el pedido.
   let adjuntos = null, errorAdjuntos = "";
   async function leerAdjuntos() {
-    if (!adjuntos) { const s = await idbLeer("adjuntos"); adjuntos = s ? await descifrar(s) : []; }
+    if (!adjuntos) {
+      const s = await idbLeer("adjuntos");
+      try { adjuntos = s ? await descifrar(s) : []; }
+      catch {
+        // Cifrados con otra llave (no debería pasar): se guardan aparte, no se borran, y se sigue con una cola nueva
+        await idbEscribir({ ["adjuntos_ilegibles_" + Date.now()]: s });
+        adjuntos = [];
+        await guardarAdjuntos();
+      }
+    }
     return adjuntos;
   }
   const guardarAdjuntos = async () => idbEscribir({ adjuntos: await cifrar(adjuntos) });
@@ -479,7 +524,7 @@ const Almacen = (() => {
   }
 
   return {
-    iniciar, guardar, guardarVarios, confirmar, borrar, ajuste, combinar, respaldos, recuperarRespaldo, encolarAdjunto, enlaceCarpeta, tocar,
+    iniciar, guardar, guardarVarios, sembrar, confirmar, olvidados, recuperarOlvidado, borrar, ajuste, combinar, respaldos, recuperarRespaldo, encolarAdjunto, enlaceCarpeta, tocar,
     exportarCopia, importarCopia, marcarCopia, tienePin, bloqueada, crearPin, desbloquear, bloquear, olvidePin, cambiarPin, esperaRestante,
     sincronizar, conectar, recibirToken, conectado, desconectar,
     get registro() { return registro; }, get errorAdjuntos() { return errorAdjuntos; }, adjuntosPendientes: async () => (await leerAdjuntos()).length,

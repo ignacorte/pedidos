@@ -249,7 +249,11 @@ const Recetario = (() => {
       const x0 = desde + ancho(ctx, etq, pt) + 2 * u;
       linea(ctx, x0, yy + 0.6, hasta, yy + 0.6, "#6b7279", 0.7, true);
       let v = valor || "", tam = pt;
-      while (tam > 6 && ancho(ctx, v, tam, { negrita: true }) > hasta - x0 - 1) tam -= 0.5;
+      while (tam > 7 && ancho(ctx, v, tam, { negrita: true }) > hasta - x0 - 1) tam -= 0.5;
+      if (ancho(ctx, v, tam, { negrita: true }) > hasta - x0 - 1) {
+        while (v.length > 1 && ancho(ctx, v + "…", tam, { negrita: true }) > hasta - x0 - 1) v = v.slice(0, -1);
+        v = v.trimEnd() + "…";
+      }
       texto(ctx, v, x0 + 1, yy - 0.3, tam, { negrita: true, color: "#111" });
     };
     const casilla = (etq, xx, yy) => { rect(ctx, xx, yy - 3.6 * u, 3.6 * u, 3.6 * u, "#3a3f44", 0.9); texto(ctx, etq, xx + 3.6 * u + 1.5, yy, pt, { color: "#3a3f44" }); };
@@ -299,8 +303,9 @@ const Recetario = (() => {
   async function hojas(tipo, d, perfil) {
     const { medico, institucion } = perfil;
     const inst = esInstitucional(d, institucion);
-    const colores = inst ? { acento: institucion.color_acento || "#092b50", segundo: institucion.color_secundario || "#519bb4" }
-      : { acento: medico.color_acento || "#1f3a5f", segundo: medico.color_secundario || "#b08d57" };
+    const col = (c, def) => (/^#[0-9a-f]{6}$/i.test(c || "") ? c : def);
+    const colores = inst ? { acento: col(institucion.color_acento, "#092b50"), segundo: col(institucion.color_secundario, "#519bb4") }
+      : { acento: col(medico.color_acento, "#1f3a5f"), segundo: col(medico.color_secundario, "#b08d57") };
     const nombreMedico = [medico.titulo, medico.apellido, medico.nombre].filter(Boolean).join(" ");
     const matriculas = [medico.mp && "M.P. " + medico.mp, medico.me && "M.E. " + medico.me].filter(Boolean).join(" · ");
     const proc = procedimientoTexto(d);
@@ -326,15 +331,20 @@ const Recetario = (() => {
         alto = lh(base) + 3.8 * u;
         dibujar = () => texto(ctx, b.h3.toUpperCase(), area.xMin, y + 3 * u + base * PT, base, { negrita: true, color: x.colores.acento, espaciado: 0.7 });
       } else {
-        const pt = b.aviso ? base - 2 : base, sangria = b.li !== undefined ? 5 : 0;
+        const pt = b.aviso ? base - 2 : base, sangria = b.li !== undefined ? 5 : 0, color = b.aviso ? "#8a1c1c" : TINTA;
         const partes = b.li !== undefined ? [[b.li], ...(b.codigo ? [[` (${b.codigo})`]] : [])] : b.aviso ? [[b.aviso]] : b.p;
         const ls = partir(ctx, partes, pt, area.ancho - sangria);
-        alto = ls.length * lh(pt) + (b.li !== undefined ? 0.5 : 1.5) + (b.aviso ? 3 : 0);
-        dibujar = () => {
-          let yy = y + (b.aviso ? 3 : 0) + pt * PT;
-          if (b.li !== undefined) texto(ctx, "•", area.xMin + 1.5, yy, pt);
-          for (const l of ls) { escribir(ctx, l, area.xMin + sangria, yy, pt, b.aviso ? "#8a1c1c" : TINTA); yy += lh(pt); }
-        };
+        // Un ítem corto no se parte entre dos hojas; un párrafo largo sigue en la hoja siguiente
+        if (ls.length <= 3 && y + (b.aviso ? 3 : 0) + ls.length * lh(pt) > area.fin) ({ ctx, area } = empezar(), y = area.y);
+        y += b.aviso ? 3 : 0;
+        ls.forEach((l, i) => {
+          if (y + lh(pt) > area.fin) ({ ctx, area } = empezar(), y = area.y);
+          if (i === 0 && b.li !== undefined) texto(ctx, "•", area.xMin + 1.5, y + pt * PT, pt);
+          escribir(ctx, l, area.xMin + sangria, y + pt * PT, pt, color);
+          y += lh(pt);
+        });
+        y += b.li !== undefined ? 0.5 : 1.5;
+        continue;
       }
       if (y + alto > area.fin) ({ ctx, area } = empezar(), y = area.y);
       dibujar();

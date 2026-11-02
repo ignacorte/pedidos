@@ -60,15 +60,15 @@ table.editable th { text-align: left; font-size: 12px; color: var(--suave); padd
 table.editable td { padding: 3px 2px; vertical-align: top; }
 table.editable td:first-child { width: 64px; }
 #tabla-estudios td:first-child { width: 86px; }
-table.editable td:last-child { width: 36px; }
+table.editable td:last-child { width: 42px; }
 table.editable input { padding: 7px; }
-.quitar { background: none; border: 0; color: var(--rojo); font-size: 22px; cursor: pointer; padding: 4px 8px; }
+.quitar { background: none; border: 0; color: var(--rojo); font-size: 24px; cursor: pointer; padding: 4px 8px; min-width: 40px; min-height: 40px; }
 .medicamento { border: 1px solid var(--borde); border-radius: 8px; padding: 8px; margin-bottom: 8px; position: relative; }
 .medicamento .quitar { position: absolute; top: 2px; right: 2px; }
 #miniaturas { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
 .mini { position: relative; width: 84px; height: 84px; border: 1px solid var(--borde); border-radius: 6px; overflow: hidden; display: flex; align-items: center; justify-content: center; font-size: 12px; background: var(--acento-claro); text-align: center; }
 .mini img { width: 100%; height: 100%; object-fit: cover; }
-.mini .quitar { position: absolute; top: -4px; right: -4px; background: var(--tarjeta); border-radius: 50%; font-size: 18px; padding: 0 6px; }
+.mini .quitar { position: absolute; top: 0; right: 0; background: var(--tarjeta); border-radius: 0 0 0 10px; font-size: 22px; padding: 0; min-width: 36px; min-height: 36px; }
 .item { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 4px; border-bottom: 1px solid var(--borde); cursor: pointer; }
 .item:last-child { border-bottom: 0; }
 .item .sub { font-size: 12px; color: var(--suave); }

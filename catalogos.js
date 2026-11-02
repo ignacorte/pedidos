@@ -121,7 +121,7 @@ const Catalogos = (() => {
       apellido = nombre = "";
     }
     const nac = (texto.match(/(?:nac(?:imiento)?|f\.?\s*nac\.?)[^\d\n]{0,15}(\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4})/i) || [])[1] || "";
-    const tel = (texto.match(/(?:tel(?:[eé]fono)?|cel(?:ular)?|whatsapp)\.?\s*:?\s*(\+?[\d\s()-]{8,18}\d)/i) || [])[1] || "";
+    const tel = (texto.match(/(?:tel(?:[eé]fono)?|cel(?:ular)?|whatsapp)\.?\s*:?\s*(\+?[\d \t()-]{8,18}\d)/i) || [])[1] || "";
     // Diagnóstico: el del documento (corto) y su código CIE-10
     let diagnostico = (p.diagnostico || "").replace(/\s{2,}.*$/, "").trim();
     let cie = (texto.match(/\b([A-TV-Z]\d{2}(?:\.\d{1,2})?)\b/) || [])[1] || "";
@@ -130,7 +130,9 @@ const Catalogos = (() => {
     if (diagnostico.length > 100) { dudas.push("El diagnóstico leído era muy largo; se resumió: revisalo."); diagnostico = descripcionCie10(cie) || diagnostico.slice(0, 100); }
     // Procedimiento propuesto: «Plan: …», «Cirugía propuesta: …», «Se indica …»
     let procedimiento = "";
-    const prop = renglones.map((l) => l.match(/(?:cirug[ií]a (?:propuesta|indicada|programada)|operaci[oó]n propuesta|plan(?: quir[uú]rgico)?|se (?:indica|propone|programa)|indicaci[oó]n quir[uú]rgica)\s*:?\s*(.{4,90})/i)).find(Boolean);
+    const QUIRURGICO = /ectom|plast|rrafia|cirug|laparosc|videolap|hernio|colecist|apendic|ex[eé]resis|resecci|funduplic|bypass|manga|gastrect|tiroid|mastect|cuadrantect|biopsia|drenaje|ostom|otom|sutura|amputa|hemorroid|fistul|fisur|quiste|lipoma|eventr|colect|anastom|nissen|toracosc|endosc|vcc|veda/i;
+    const prop = renglones.map((l) => l.match(/(?:cirug[ií]a (?:propuesta|indicada|programada)|operaci[oó]n propuesta|\bplan(?: quir[uú]rgico)?\s*:|\bse (?:indica|propone|programa)\b|indicaci[oó]n quir[uú]rgica)\s*:?\s*(.{4,90})/i))
+      .find((m) => m && (!/^se /i.test(m[0].trim()) && !/^plan/i.test(m[0].trim()) || QUIRURGICO.test(m[1])));
     if (prop) procedimiento = prop[1].replace(/^(?:una|la|el)\s+/i, "").replace(/[.;]\s*$/, "").trim();
     else if (p.procedimientos?.[0]) procedimiento = p.procedimientos[0];
     const cirugia = !!procedimiento || /prequir|cirug[ií]a (?:propuesta|programada|indicada)|se programa|riesgo quir/i.test(texto);
@@ -139,7 +141,7 @@ const Catalogos = (() => {
     renglones.forEach((l, i) => {
       const m = l.match(/^(?:solicito|se solicita[n]?|pido|pedir|estudios(?: a solicitar)?|solicitar)\s*:?\s*(.*)$/i);
       if (!m) return;
-      const lista = [m[1], ...renglones.slice(i + 1, i + 8).filter((x) => /^[-•*·\d]/.test(x)).map((x) => x.replace(/^[-•*·\d.)\s]+/, ""))];
+      const lista = [m[1], ...renglones.slice(i + 1, i + 8).filter((x) => /^(?:[-•*·]|\d{1,2}[.)])\s*[A-Za-zÁÉÍÓÚÑáéíóúñ]/.test(x)).map((x) => x.replace(/^(?:[-•*·]|\d{1,2}[.)])\s*/, ""))];
       for (const x of lista.join(",").split(/[,;+]|\s+y\s+/)) if (x.trim().length > 2) estudiosTexto.push(x.trim());
     });
     const estudios = [], sinCodigo = [];
