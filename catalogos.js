@@ -39,7 +39,7 @@ const Catalogos = (() => {
   }
 
   // Nombres con que figuran las obras sociales (credenciales, informes, lo que se tipea)
-  const OBRAS = [[["pami", "inssjp", "jubilados y pensionados", "jubilados"], "PAMI"], [["apross", "administracion provincial del seguro de salud"], "APROSS"]];
+  const OBRAS = [[["pami", "inssjp", "inss3p", "inssip", "inssj", "jubilados y pensionados", "jubilados"], "PAMI"], [["apross", "administracion provincial del seguro de salud"], "APROSS"]];
   const obraSocialCanonica = (nombre) => {
     const n = normalizar(nombre);
     return OBRAS.find(([claves]) => claves.some((c) => n.includes(c)))?.[1] || (nombre || "").trim();
@@ -113,7 +113,12 @@ const Catalogos = (() => {
     let [apellido, ...resto] = (p.paciente || "").split(",");
     let nombre = resto.join(",").trim();
     apellido = (apellido || "").trim();
-    if (apellido && !nombre && apellido.includes(" ")) { const w = apellido.split(" "); apellido = w[0]; nombre = w.slice(1).join(" "); }
+    if (apellido && !nombre && apellido.includes(" ")) {
+      const w = apellido.split(/\s+/);
+      let n = 1;
+      while (n < w.length - 1 && (w[n - 1].length <= 3 || /^(del?|la|las|los|di|da|van|von|mac|mc|san|santa)$/i.test(w[n - 1]))) n++;
+      apellido = w.slice(0, n).join(" "); nombre = w.slice(n).join(" ");
+    }
     // El médico usuario no es el paciente (membrete, firma, sello)
     const ap = palabrasDe(medico.apellido || "");
     if (ap.size && [...palabrasDe(apellido + " " + nombre)].some((w) => ap.has(w))) {
@@ -135,11 +140,13 @@ const Catalogos = (() => {
       .find((m) => m && (!/^se /i.test(m[0].trim()) && !/^plan/i.test(m[0].trim()) || QUIRURGICO.test(m[1])));
     if (prop) procedimiento = prop[1].replace(/^(?:una|la|el)\s+/i, "").replace(/[.;]\s*$/, "").trim();
     else if (p.procedimientos?.[0]) procedimiento = p.procedimientos[0];
-    const cirugia = !!procedimiento || /prequir|cirug[ií]a (?:propuesta|programada|indicada)|se programa|riesgo quir/i.test(texto);
+    const yaOperado = /operaci[oó]n (?:efectuada|practicada|realizada)|protocolo quir[uú]rgico|cirug[ií]a (?:realizada|efectuada)|procedimiento realizado|fecha de operaci[oó]n/i.test(texto);
+    if (yaOperado) dudas.push("Es el protocolo de una cirugía ya hecha: no se sugieren prequirúrgicos, materiales ni autorización (agregalos si hacen falta).");
+    const cirugia = !yaOperado && (!!procedimiento || /prequir|cirug[ií]a (?:propuesta|programada|indicada)|se programa|riesgo quir/i.test(texto));
     // Estudios a pedir: renglones después de «Solicito», «Se solicita», «Pido», «Estudios:»
     const estudiosTexto = [];
     renglones.forEach((l, i) => {
-      const m = l.match(/^(?:solicito|se solicita[n]?|pido|pedir|estudios(?: a solicitar)?|solicitar)\s*:?\s*(.*)$/i);
+      const m = l.match(/^(?:(?:solicito|se solicita[n]?|pido|pedir|solicitar)\s*:?|estudios(?: a solicitar)?\s*:)\s*(.*)$/i);
       if (!m) return;
       const lista = [m[1], ...renglones.slice(i + 1, i + 8).filter((x) => /^(?:[-•*·]|\d{1,2}[.)])\s*[A-Za-zÁÉÍÓÚÑáéíóúñ]/.test(x)).map((x) => x.replace(/^(?:[-•*·]|\d{1,2}[.)])\s*/, ""))];
       for (const x of lista.join(",").split(/[,;+]|\s+y\s+/)) if (x.trim().length > 2) estudiosTexto.push(x.trim());
@@ -166,13 +173,13 @@ const Catalogos = (() => {
     return {
       paciente: { apellido: mayus(apellido), nombre: titulo(nombre), dni: p.dni || "", fecha_nacimiento: nac.replace(/[.-]/g, "/"), telefono: tel.replace(/\s+/g, " ").trim() },
       cobertura: { obra_social: obraSocialCanonica(p.obra_social_texto || ""), nro_afiliado: (p.afiliado || p.afiliadoPorForma || "").trim() },
-      clinica: { diagnostico, cie10: cie, procedimiento },
+      clinica: { diagnostico: sinGritar(diagnostico), cie10: cie, procedimiento: sinGritar(procedimiento) },
       kit_sugerido: kit?.id || "",
       recomendacion: { combo: conPrequirurgico ? "prequirurgico-pami" : "", estudios, documentos },
       vacio: !Object.values(leido).some(Boolean) && !estudios.length,
       dudas,
       secciones: sec,
-      resumen: redactarResumen(sec, { fecha_nacimiento: nac.replace(/[.-]/g, "/"), sexo, diagnostico, procedimiento }),
+      resumen: redactarResumen(sec, { fecha_nacimiento: nac.replace(/[.-]/g, "/"), sexo, diagnostico, procedimiento, realizado: yaOperado ? fechaOperacion(texto) || true : false }),
       texto,
     };
   }
@@ -180,10 +187,10 @@ const Catalogos = (() => {
   // ---------- Resumen de HC sin IA: secciones de la HC + plantilla de redacción ----------
   // Secciones que se reconocen al principio de un renglón (la etiqueta) y siguen en los renglones de abajo hasta la etiqueta siguiente
   const SECCIONES = [
-    ["motivo", /^(?:motivo de (?:la )?consulta|m\.?\s?c\.?(?=\s*:)|consulta por)\s*[:.-]?\s*/i],
-    ["actual", /^(?:enfermedad actual|cuadro actual|e\.?\s?a\.?(?=\s*:))\s*[:.-]?\s*/i],
-    ["antecedentes", /^(?:antecedentes(?: personales| patol[oó]gicos| quir[uú]rgicos| de relevancia)?|a\.?\s?p\.?\s?p\.?(?=\s*:)|antec\.)\s*[:.-]?\s*/i],
-    ["examen", /^(?:examen f[ií]sico|ex\.? f[ií]sico|e\.?\s?f\.?(?=\s*:)|al examen(?: f[ií]sico)?)\s*[:.-]?\s*/i],
+    ["motivo", /^(?:(?:motivo de (?:la )?consulta|m\.?\s?c\.?)\s*[:-]|consulta por\b:?)\s*/i],
+    ["actual", /^(?:enfermedad actual|cuadro actual|e\.?\s?a\.?)\s*[:-]\s*/i],
+    ["antecedentes", /^(?:antecedentes(?: personales| patol[oó]gicos| quir[uú]rgicos| de relevancia)?|a\.?\s?p\.?\s?p\.?|antec\.)\s*[:-]\s*/i],
+    ["examen", /^(?:(?:examen f[ií]sico|ex\.? f[ií]sico|e\.?\s?f\.?)\s*[:-]|al examen(?: f[ií]sico)?\b:?)\s*/i],
   ];
   const ESTUDIO = /^(?:ecograf[ií]a|eco\b|ecodoppler|tac\b|tc\b|tomograf[ií]a|rmn\b|rm\b|resonancia|colangiorresonancia|laboratorio|lab\b|rx\b|radiograf[ií]a|vcc\b|veda\b|colonoscop[ií]a|videocolonoscop[ií]a|endoscop[ií]a|videoendoscop[ií]a|ecg\b|electrocardiograma|anatom[ií]a patol[oó]gica|biopsia|estudios(?: complementarios)?\b)/i;
   const ETIQUETA = /^[A-Za-zÁÉÍÓÚÑáéíóúñ°.\/ ]{2,35}:/;
@@ -211,7 +218,19 @@ const Catalogos = (() => {
 
   const sinPunto = (t) => (t || "").trim().replace(/[\s.;,]+$/, "");
   // Dentro de una oración: «Dolor abdominal» → «dolor abdominal» (las siglas quedan: «HTA», «DBT»)
-  const enOracion = (t) => { t = sinPunto(t); return /^[A-ZÁÉÍÓÚÑ]{2}/.test(t) ? t : t.charAt(0).toLowerCase() + t.slice(1); };
+  // Texto todo en mayúsculas (sistemas de HC): en minúsculas, conservando siglas cortas sueltas («HTA», «DBT 2»)
+  // (con las tildes que esos sistemas no ponen en las palabras más comunes)
+  const ACENTOS = { colecistectomia: "colecistectomía", laparoscopica: "laparoscópica", laparoscopico: "laparoscópico", videolaparoscopica: "videolaparoscópica",
+    apendicectomia: "apendicectomía", vesicula: "vesícula", patologica: "patológica", anatomia: "anatomía", cirugia: "cirugía", quirurgica: "quirúrgica",
+    quirurgico: "quirúrgico", ecografia: "ecografía", tomografia: "tomografía", hernia: "hernia", inguinal: "inguinal", eventracion: "eventración",
+    colangiografia: "colangiografía", colangiorresonancia: "colangiorresonancia", gastrectomia: "gastrectomía", tiroidectomia: "tiroidectomía",
+    colectomia: "colectomía", hemorroidectomia: "hemorroidectomía", diagnostico: "diagnóstico", biopsia: "biopsia", region: "región", higado: "hígado",
+    pancreas: "páncreas", via: "vía", vias: "vías", abdominal: "abdominal", cronica: "crónica", aguda: "aguda", litiasica: "litiásica", umbilical: "umbilical",
+    epigastrica: "epigástrica", recidivada: "recidivada", incisional: "incisional", hiatal: "hiatal", funduplicatura: "funduplicatura", exeresis: "exéresis" };
+  const sinGritar = (t) => (t && t === t.toUpperCase() && /[A-ZÁÉÍÓÚÑ]{5}/.test(t)
+    ? t.toLowerCase().replace(/\p{L}+/gu, (w) => ACENTOS[w] || w).replace(/^\p{L}/u, (c) => c.toUpperCase()) : t || "");
+  const enOracion = (t) => { t = sinPunto(sinGritar(t)); return /^[A-ZÁÉÍÓÚÑ]{2}/.test(t) ? t : t.charAt(0).toLowerCase() + t.slice(1); };
+  const fechaOperacion = (texto) => (texto.match(/fecha de (?:la )?operaci[oó]n\s*:?\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i) || [])[1] || "";
   const oracion = (t) => { t = sinPunto(t); return t ? t.charAt(0).toUpperCase() + t.slice(1) + "." : ""; };
   function edadDe(fnac) {
     const m = (fnac || "").match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
@@ -232,10 +251,12 @@ const Catalogos = (() => {
     if (sec.actual) partes.push(oracion(sec.actual));
     if (sec.examen) partes.push(oracion("Al examen físico: " + enOracion(sec.examen)));
     const diag = sinPunto(d.diagnostico), proc = sinPunto(d.procedimiento);
-    if (diag && proc) partes.push(oracion(`Con diagnóstico de ${enOracion(diag)}, se indica ${enOracion(proc)}`));
+    // Protocolo de una cirugía ya hecha: «se realizó … el 30/10/26»
+    const verbo = d.realizado ? "se realizó" : "se indica", cuando = typeof d.realizado === "string" ? ` el ${d.realizado}` : "";
+    if (diag && proc) partes.push(oracion(`Con diagnóstico de ${enOracion(diag)}, ${verbo} ${enOracion(proc)}${cuando}`));
     else if (diag) partes.push(oracion("Diagnóstico: " + enOracion(diag)));
-    else if (proc) partes.push(oracion("Se indica " + enOracion(proc)));
-    return { clinico: partes.join(" "), estudios: (sec.estudios || []).map(oracion).join(" ") };
+    else if (proc) partes.push(oracion(`${d.realizado ? "Se realizó" : "Se indica"} ${enOracion(proc)}${cuando}`));
+    return { clinico: partes.join(" "), estudios: (sec.estudios || []).map((e) => oracion(sinGritar(e))).join(" ") };
   }
 
   const capitalizar = (s) => { s = (s || "").toLowerCase(); return s.charAt(0).toUpperCase() + s.slice(1); };
