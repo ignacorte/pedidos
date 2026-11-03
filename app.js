@@ -163,10 +163,10 @@ function cargarLectura(d) {
       if (el && v && !el.value.trim()) { el.value = v; el.classList.add("dudoso"); }
     }
   }
-  estado.secciones = d.secciones;
+  estado.secciones = d.secciones; estado.datosResumen = { sexo: d.sexo, realizado: d.realizado };
   for (const [k, v] of [["fundamento", d.resumen.clinico], ["resumen_estudios", d.resumen.estudios]]) {
     const el = campo("autorizacion." + k);
-    if (v && !el.value.trim()) { el.value = v; el.classList.add("dudoso"); }
+    if (v && !el.value.trim()) { el.value = v; el.classList.add("dudoso"); if (k === "fundamento") estado.resumenAuto = v; }
   }
   if (d.kit_sugerido && !$("#tabla-materiales tbody").children.length) { $("#sel-kit").value = d.kit_sugerido; aplicarKit(d.kit_sugerido); }
   actualizarMembrete();
@@ -203,7 +203,7 @@ function armarResumen() {
   const r = Catalogos.redactarResumen(estado.secciones || {}, { fecha_nacimiento: campo("paciente.fecha_nacimiento").value.trim(),
     diagnostico: campo("clinica.diagnostico").value, procedimiento: Recetario.procedimientoTexto(recolectar()) });
   if (!r.clinico || r.clinico === "Paciente.") return toast("Faltan datos: cargá al menos el diagnóstico o el procedimiento (o leé la HC en el paso 1).", 5000);
-  f.value = r.clinico; f.classList.add("dudoso");
+  f.value = estado.resumenAuto = r.clinico; f.classList.add("dudoso");
   if (r.estudios) { e.value = r.estudios; e.classList.add("dudoso"); }
   toast("Resumen armado: revisalo y corregilo antes de mandarlo.", 4000);
 }
@@ -480,7 +480,7 @@ function limpiarFormulario({ chat = true } = {}) {
   $("#sel-kit").value = $("#sel-combo").value = "";
   $("#aviso-kit").innerHTML = $("#dudas").innerHTML = $("#estado-extraccion").innerHTML = "";
   estado.archivos = []; estado.secciones = null; renderMiniaturas();
-  estado.textoLeido = ""; estado.ia = null; estado.antesIA = null;
+  estado.textoLeido = ""; estado.ia = null; estado.antesIA = null; estado.resumenAuto = ""; estado.datosResumen = null;
   if (chat) { estado.chatAdjuntos = []; $("#chat-mensajes").innerHTML = ""; $("#chat-texto").value = ""; renderAdjuntosChat(); }
   if (estado.ultimo) { URL.revokeObjectURL(estado.ultimo.url); URL.revokeObjectURL(estado.ultimo.urlPng); }
   estado.ultimo = null; estado.pedidoDe = {};
@@ -716,9 +716,20 @@ function conectarGenerar(r) {
   }));
   $(".ver-pedido", r).onclick = () => ir("nuevo");
 }
+// Resumen clínico armado por la plantilla (sin IA) para estos datos
+const resumenAutomatico = (d) => Catalogos.redactarResumen(estado.secciones || {}, { ...(estado.datosResumen || {}), fecha_nacimiento: d.paciente.fecha_nacimiento,
+  diagnostico: d.clinica.diagnostico, procedimiento: d.clinica.procedimiento }).clinico;
 function aplicarCambios(elegidos, propuesta) {
-  estado.antesIA = { datos: recolectar(), rutas: elegidos.map((c) => c.ruta) };
+  const antes = recolectar();
+  estado.antesIA = { datos: antes, rutas: elegidos.map((c) => c.ruta) };
   for (const c of elegidos) ponerCampo(c.ruta, propuesta, true);
+  // Si cambió el diagnóstico o el procedimiento y el resumen era el armado solo, se vuelve a armar con los datos nuevos
+  const f = campo("autorizacion.fundamento");
+  if (elegidos.some((c) => ["clinica.diagnostico", "clinica.procedimiento", "clinica.lateralidad"].includes(c.ruta)) && !elegidos.some((c) => c.ruta === "autorizacion.fundamento")
+    && antes.autorizacion.fundamento && [estado.resumenAuto, resumenAutomatico(antes)].includes(antes.autorizacion.fundamento)) {
+    const nuevo = resumenAutomatico(recolectar());
+    if (nuevo !== f.value) { f.value = estado.resumenAuto = nuevo; f.classList.add("dudoso"); estado.antesIA.rutas.push("autorizacion.fundamento"); }
+  }
   if (elegidos.some((c) => c.ruta === "clinica.diagnostico") && !elegidos.some((c) => c.ruta === "clinica.cie10")) {
     const el = campo("clinica.cie10"), nuevo = Catalogos.cie10De(campo("clinica.diagnostico").value)?.codigo || "";
     if (nuevo !== el.value) { el.value = nuevo; el.classList.add("dudoso"); estado.antesIA.rutas.push("clinica.cie10"); }
@@ -1048,7 +1059,7 @@ function configurarSeguridad() {
 }
 
 // ---------------- Actualizaciones de la app ----------------
-const VERSION_APP = "8"; // igual que VERSION en sw.js
+const VERSION_APP = "9"; // igual que VERSION en sw.js
 function registrarActualizaciones() {
   if (!("serviceWorker" in navigator)) return;
   const habia = !!navigator.serviceWorker.controller;

@@ -201,6 +201,7 @@ const Catalogos = (() => {
       dudas,
       secciones: sec,
       resumen: redactarResumen(sec, { fecha_nacimiento: nac.replace(/[.-]/g, "/"), sexo, diagnostico, procedimiento, realizado: yaOperado ? fechaOperacion(texto) || true : false }),
+      sexo, realizado: yaOperado ? fechaOperacion(texto) || true : false,
       texto,
     };
   }

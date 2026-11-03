@@ -15,25 +15,29 @@ const Asistente = (() => {
   // Modelos abiertos de Groq, del mejor al más simple, por si el elegido deja de estar disponible
   const PREFERIDOS = ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "moonshotai/kimi-k2-instruct", "qwen/qwen3-32b", "openai/gpt-oss-20b", "llama-3.1-8b-instant"];
 
+  // La IA devuelve SOLO la lista de campos que cambia (no el pedido entero): así no toca lo que no se pidió
   const INSTRUCCIONES = `Sos el asistente de un cirujano general argentino dentro de su app de pedidos médicos (estudios, materiales, autorización de cirugía, resumen de historia clínica y receta).
-Recibís el pedido actual en JSON, a veces el texto leído de un documento viejo (receta o pedido anterior, con posibles errores de lectura) y la indicación del médico.
-Devolvé SOLO un objeto JSON con exactamente las mismas claves que "pedido", con los cambios que pidió el médico aplicados y todo lo demás igual.
+Recibís el pedido actual en JSON ("pedido"), la fecha de hoy ("hoy"), la indicación del médico ("indicacion") y a veces el texto leído de un documento viejo ("documento_viejo", con posibles errores de lectura).
+Respondé SOLO un objeto JSON así:
+{"cambios": [{"campo": "<campo>", "valor": <valor nuevo>}], "_nota": "<frase corta para el médico, o vacío>"}
+Campos posibles (texto): "clinica.diagnostico", "clinica.procedimiento", "clinica.lateralidad", "clinica.caracter", "autorizacion.fecha_probable", "autorizacion.fundamento", "autorizacion.resumen_estudios", "observaciones", "obra_social".
+Campos posibles (lista completa nueva, reemplaza a la anterior): "estudios" [{"codigo","descripcion"}], "materiales" [{"cantidad","descripcion"}], "medicamentos" [{"nombre_generico","presentacion","cantidad","posologia"}].
 Dónde va cada cosa:
-- Autorización de cirugía o procedimiento («Solicito: Autorización para X»): X va en clinica.procedimiento; también usa clinica.caracter y clinica.lateralidad. «Cambiá la autorización para Y» = poner Y en clinica.procedimiento (redactado como procedimiento médico completo y correcto).
-- Pedido de estudios: la lista "estudios". Pedido de materiales: la lista "materiales". Receta: la lista "medicamentos".
-- Resumen de historia clínica: autorizacion.fundamento y autorizacion.resumen_estudios.
-- La FECHA DEL DOCUMENTO no es un campo: al generar el documento sale sola con la fecha de hoy ("hoy"). Si piden «fecha de hoy» o «actualizar la fecha», no cambies nada por eso y explicalo en "_nota". autorizacion.fecha_probable es solo la fecha probable de la cirugía.
+- Autorización («Solicito: Autorización para X»): X es "clinica.procedimiento". «Cambiá la autorización / el procedimiento a Y» = UN solo cambio en "clinica.procedimiento" con Y redactado como procedimiento médico completo y correcto.
+- Pedido de estudios = "estudios"; pedido de materiales = "materiales"; receta = "medicamentos".
+- "autorizacion.fundamento" y "autorizacion.resumen_estudios" son el resumen de historia clínica: cambialos SOLO si el médico pide cambiar el resumen (la app actualiza sola el resumen armado automáticamente).
+- La FECHA DEL DOCUMENTO no es un campo: sale sola con la fecha de hoy al generarlo. Si piden «fecha de hoy» o «actualizar la fecha», devolvé "cambios": [] y explicalo en "_nota". "autorizacion.fecha_probable" es solo la fecha probable de la cirugía.
 Reglas:
-- El documento viejo es un recetario: membrete, nombre de la institución, lema, datos y sello del médico (nombre, matrícula M.P./M.E., especialidad), firma, «Rp/» y pie NO son datos del pedido. Nunca los copies a ningún campo.
-- Cambiá únicamente lo que se pide. No inventes datos clínicos que nadie mencionó.
-- Si te piden tomar algo del documento viejo (por ejemplo «copiá los medicamentos de la receta»), pasalo a los campos que correspondan.
+- Incluí SOLO los campos que el médico pidió cambiar. Nada más.
+- La indicación puede tener errores de tipeo o de dictado (ej.: «basceso hepatic» = «absceso hepático»): escribí siempre el término médico correcto, con tildes y mayúscula inicial. Nunca copies la indicación tal cual dentro de un campo.
+- No inventes datos clínicos que nadie mencionó.
+- Si te piden tomar algo del documento viejo (por ejemplo «copiá los medicamentos de la receta»), pasalo al campo que corresponda.
+- El documento viejo es un recetario: membrete, institución, lema, datos y sello del médico (nombre, matrícula M.P./M.E., especialidad), firma, «Rp/» y pie NO son datos del pedido. Nunca los copies.
 - Medicamentos: nombre_generico (genérico, sin marca, salvo que el médico la pida), presentacion (ej.: «comprimidos 500 mg»), cantidad (número de envases), posologia (ej.: «1 comprimido cada 8 h por 5 días»).
-- Estudios y materiales: una fila por ítem. En estudios nuevos dejá "codigo" vacío (la app lo busca en el nomenclador). En materiales "cantidad" es texto.
-- Si cambia el diagnóstico, dejá "cie10" vacío (la app lo recalcula).
-- lateralidad solo puede ser "", "Derecha", "Izquierda" o "Bilateral"; caracter solo "", "Programada" o "Urgencia".
-- Fechas DD/MM/AAAA ("hoy" trae la fecha de hoy, para «mañana», «en 15 días», etc.). Castellano rioplatense, terminología médica correcta, con tildes.
-- "[PACIENTE]" reemplaza los datos personales del paciente: dejalo tal cual.
-Agregá además la clave "_nota" con una frase corta para el médico si algo no se pudo hacer o hay que revisarlo; si no, "".`;
+- En estudios nuevos dejá "codigo" vacío (la app lo busca en el nomenclador). En materiales "cantidad" es texto.
+- "clinica.lateralidad" solo puede ser "", "Derecha", "Izquierda" o "Bilateral"; "clinica.caracter" solo "", "Programada" o "Urgencia".
+- Fechas DD/MM/AAAA ("hoy" sirve para «mañana», «en 15 días», etc.). Castellano rioplatense.
+- "[PACIENTE]" reemplaza los datos personales del paciente: dejalo tal cual.`;
 
   const CAMPOS = { clinica: ["diagnostico", "cie10", "procedimiento", "lateralidad", "caracter"], autorizacion: ["fecha_probable", "fundamento", "resumen_estudios"] };
   const NOMBRES = { diagnostico: "Diagnóstico", cie10: "CIE-10", procedimiento: "Procedimiento (autorización)", lateralidad: "Lateralidad", caracter: "Carácter",
@@ -147,8 +151,17 @@ Agregá además la clave "_nota" con una frase corta para el médico si algo no 
     const texto = await llamar(conf, { messages: [{ role: "system", content: INSTRUCCIONES }, { role: "user", content: JSON.stringify(mensaje) }] });
     let r = jsonDe(texto);
     // A veces la IA devuelve todo el mensaje ({hoy, pedido, indicacion}) en vez de solo el pedido
-    if (r && typeof r.pedido === "object" && !r.clinica) r = { ...r.pedido, _nota: r._nota ?? r.pedido._nota };
+    if (r && typeof r.pedido === "object" && !r.clinica && !Array.isArray(r.cambios)) r = { ...r.pedido, _nota: r._nota ?? r.pedido._nota };
+    if (Array.isArray(r?.cambios)) r = conCambios(mensaje.pedido, r.cambios, r._nota ?? r.nota);
     const out = limpiar(r, mensaje.pedido);
+    // La indicación pegada dentro de un campo: se descarta ese cambio
+    const ind = Catalogos.normalizar(mensaje.indicacion || "");
+    const copiaIndicacion = (v) => ind.length >= 12 && Catalogos.normalizar(v).includes(ind.slice(0, Math.min(ind.length, 30)));
+    const copiados = [];
+    for (const [g, ks] of Object.entries(CAMPOS)) for (const k of ks)
+      if (out[g][k] !== mensaje.pedido[g][k] && copiaIndicacion(out[g][k])) { out[g][k] = mensaje.pedido[g][k]; copiados.push(NOMBRES[k]); }
+    if (out.observaciones !== mensaje.pedido.observaciones && copiaIndicacion(out.observaciones)) { out.observaciones = mensaje.pedido.observaciones; copiados.push(NOMBRES.observaciones); }
+    if (copiados.length) out.nota = [out.nota, `Se descartó lo que la IA pegó de tu indicación en: ${copiados.join(", ")}.`].filter(Boolean).join(" ");
     // Texto del membrete metido en un campo: se descarta ese cambio
     const descartados = [];
     for (const [g, ks] of Object.entries(CAMPOS)) for (const k of ks)
@@ -157,6 +170,19 @@ Agregá además la clave "_nota" con una frase corta para el médico si algo no 
     if (descartados.length) out.nota = [out.nota, `Se descartó lo que la IA copió del membrete del recetario en: ${descartados.join(", ")}.`].filter(Boolean).join(" ");
     out.crudo = texto;
     return out;
+  }
+
+  // {"cambios": [{campo, valor}]} → pedido completo (lo no mencionado queda como estaba)
+  function conCambios(antes, cambios, nota) {
+    const r = JSON.parse(JSON.stringify(antes));
+    for (const c of cambios) {
+      if (!c || typeof c.campo !== "string") continue;
+      const [g, k] = c.campo.split(".");
+      if (k && CAMPOS[g]?.includes(k)) r[g][k] = c.valor;
+      else if (!k && ["observaciones", "obra_social", "estudios", "materiales", "medicamentos"].includes(g)) r[g] = c.valor;
+    }
+    r._nota = nota;
+    return r;
   }
 
   // Deja la respuesta con la forma exacta del pedido (lo que falte o venga raro queda como estaba)
