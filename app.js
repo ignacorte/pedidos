@@ -560,6 +560,17 @@ async function guardarIA() {
     toast("Asistente de IA listo");
   } catch (e) { $("#ia-estado").textContent = "⚠️ " + e.message; }
 }
+// La clave ya cargada en la otra app (mismo sitio), abierta con el PIN de esa app
+async function traerClaveIA() {
+  const pin = prompt(`PIN de ${Almacen.otraApp} (para abrir la clave que guardaste ahí):`);
+  if (!pin) return;
+  $("#ia-estado").textContent = "Buscando la clave…";
+  const clave = await Almacen.secretoDeOtra("groq", pin);
+  if (!clave) { $("#ia-estado").textContent = `No encontré una clave de ${Almacen.otraApp} en este navegador con ese PIN.`; return; }
+  await Almacen.guardarSecreto("groq", clave);
+  await verIA();
+  $("#ia-estado").textContent = `✓ Se usa la misma clave que en ${Almacen.otraApp} (guardada acá cifrada con tu PIN).`;
+}
 async function borrarIA() {
   if (!confirm("¿Borrar la clave de Groq de este dispositivo?")) return;
   await Almacen.guardarSecreto("groq", null);
@@ -1059,7 +1070,7 @@ function configurarSeguridad() {
 }
 
 // ---------------- Actualizaciones de la app ----------------
-const VERSION_APP = "9"; // igual que VERSION en sw.js
+const VERSION_APP = "10"; // igual que VERSION en sw.js
 function registrarActualizaciones() {
   if (!("serviceWorker" in navigator)) return;
   const habia = !!navigator.serviceWorker.controller;
@@ -1133,6 +1144,7 @@ async function arrancar() {
   $("#chat-mensajes").addEventListener("click", (e) => { const a = e.target.closest("[data-ir]"); if (a) { e.preventDefault(); ir(a.dataset.ir); } });
   $("#ia-guardar").addEventListener("click", guardarIA);
   $("#ia-borrar").addEventListener("click", () => borrarIA().catch((e) => toast(e.message)));
+  $("#ia-traer").addEventListener("click", () => traerClaveIA().catch((e) => toast(e.message)));
   $$("[data-generar]").forEach((b) => b.addEventListener("click", () => generar(b.dataset.generar, b)));
   let tm; campo("cobertura.obra_social").addEventListener("input", () => { clearTimeout(tm); tm = setTimeout(actualizarMembrete, 300); });
   $("#sel-membrete").addEventListener("change", () => { estado.membreteElegido = $("#sel-membrete").value; actualizarMembrete(); });
