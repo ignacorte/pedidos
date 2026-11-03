@@ -1009,7 +1009,7 @@ function configurarSeguridad() {
 }
 
 // ---------------- Actualizaciones de la app ----------------
-const VERSION_APP = "5"; // igual que VERSION en sw.js
+const VERSION_APP = "6"; // igual que VERSION en sw.js
 function registrarActualizaciones() {
   if (!("serviceWorker" in navigator)) return;
   const habia = !!navigator.serviceWorker.controller;
@@ -1079,7 +1079,6 @@ async function arrancar() {
   $("#chat-enviar").addEventListener("click", () => enviarChat());
   $("#chat-texto").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !matchMedia("(pointer: coarse)").matches) { e.preventDefault(); enviarChat(); } });
   $("#chat-texto").addEventListener("input", (e) => { e.target.style.height = ""; e.target.style.height = Math.min(e.target.scrollHeight, 140) + "px"; });
-  $$("[data-ejemplo]").forEach((b) => b.addEventListener("click", () => { $("#chat-texto").value = b.dataset.ejemplo; $("#chat-texto").focus(); }));
   // Enlaces a otra vista dentro de los mensajes del chat
   $("#chat-mensajes").addEventListener("click", (e) => { const a = e.target.closest("[data-ir]"); if (a) { e.preventDefault(); ir(a.dataset.ir); } });
   $("#ia-guardar").addEventListener("click", guardarIA);

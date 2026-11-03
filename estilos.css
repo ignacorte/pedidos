@@ -106,7 +106,6 @@ details.avanzado > summary .ayuda { font-weight: 400; display: inline; margin: 0
 #v-asistente { padding-bottom: 96px; }
 #chat-inicio { text-align: center; padding: 8px 4px 0; }
 #chat-inicio h2::after { display: none; }
-#chat-ejemplos { justify-content: center; }
 .candado { font-size: 12px; }
 #chat-mensajes { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 .msg { scroll-margin-bottom: 150px; max-width: 92%; border-radius: 14px; padding: 10px 12px; font-size: 15px; line-height: 1.4; overflow-wrap: anywhere; }
