@@ -2,9 +2,12 @@
 // App: con conexión, siempre la versión publicada (la copia guardada es solo para cuando no hay señal). Librerías de
 // vendor/ (versión fija, ~27 MB): se descargan una sola vez, la primera vez que se lee un documento.
 // Nunca se guardan respuestas de Google (datos del profesional) ni del asistente de IA (solo se atiende el propio origen).
-const VERSION = "pedidos-v4"; // igual que VERSION_APP en app.js
+const VERSION = "pedidos-v5"; // igual que VERSION_APP en app.js
 const LIBRERIAS = "pedidos-libs-1"; // aparte: no se vuelve a bajar en cada actualización de la app
-const APP = ["./", "index.html", "estilos.css", "config.js", "almacen.js", "lector.js", "catalogos.js", "recetario.js", "asistente.js", "app.js", "manifest.webmanifest",
+// Los .js y .css llevan «?v=N» en index.html (igual que VERSION): así nunca se mezcla un archivo viejo guardado en el
+// navegador con uno nuevo (pasó en la v4: app.js nuevo con almacen.js viejo)
+const V = "?v=" + VERSION.split("-v")[1];
+const APP = ["./", "index.html", "estilos.css" + V, ...["config", "almacen", "lector", "catalogos", "recetario", "asistente", "app"].map((n) => n + ".js" + V), "manifest.webmanifest",
   "icono.svg", "icono-192.png", "icono-512.png", "logo-quiron.svg", "datos/nomenclador_pami.json", "datos/pami_modulos_cirugia.json", "datos/cie10_cirugia.json", "datos/kits_iniciales.json"];
 
 // cache: "reload": directo del servidor (GitHub Pages deja los archivos 10 min en la caché del navegador y se guardaba

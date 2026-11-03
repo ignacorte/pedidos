@@ -11,7 +11,7 @@
 <link rel="icon" href="icono.svg">
 <link rel="apple-touch-icon" href="icono-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<link rel="stylesheet" href="estilos.css">
+<link rel="stylesheet" href="estilos.css?v=5">
 </head>
 <body>
 <header>
@@ -53,6 +53,30 @@
   </section>
 
   <!-- ===================== NUEVO PEDIDO ===================== -->
+  <!-- Asistente: pantalla de inicio, tipo chat. «+» carga una foto o PDF (se lee dentro del dispositivo) y se escribe qué hacer -->
+  <section id="v-asistente" hidden>
+    <div id="chat-inicio">
+      <h2>¿Qué hacemos?</h2>
+      <p class="ayuda">Tocá <b>+</b> para cargar una receta, un pedido viejo o una HC (se lee dentro de este dispositivo), y escribí qué querés: cambiar, agregar o sacar. Después generás el documento.</p>
+      <div class="fila" id="chat-ejemplos">
+        <button class="boton chico secundario" data-ejemplo="Copiá los medicamentos de la receta y cambiá el ibuprofeno por paracetamol 1 g cada 8 h">Copiar receta vieja</button>
+        <button class="boton chico secundario" data-ejemplo="Pasalo a bilateral">Pasar a bilateral</button>
+        <button class="boton chico secundario" data-ejemplo="Agregá ecografía abdominal y laboratorio prequirúrgico">Agregar estudios</button>
+      </div>
+      <p class="ayuda candado">🔒 A la IA nunca le llega el nombre, el DNI, el afiliado ni el teléfono del paciente, y antes de mandar ves exactamente qué sale.</p>
+      <div id="chat-sin-clave" class="alerta" hidden>Para que la IA modifique pedidos, cargá tu clave gratuita en <a href="#" data-ir="config">Configuración › Asistente de IA</a>. Leer documentos funciona igual sin clave.</div>
+    </div>
+    <div id="chat-mensajes"></div>
+    <div id="chat-barra">
+      <div id="chat-adjuntos"></div>
+      <div class="chat-fila">
+        <label class="chat-mas" title="Cargar foto o PDF">+<input type="file" id="chat-archivo" accept="image/*,application/pdf" multiple hidden></label>
+        <textarea id="chat-texto" rows="1" placeholder="Escribí qué querés hacer…" enterkeyhint="send"></textarea>
+        <button class="chat-enviar" id="chat-enviar" title="Enviar">➤</button>
+      </div>
+    </div>
+  </section>
+
   <section id="v-nuevo" hidden>
     <div class="alerta" id="falta-perfil" hidden>Antes del primer pedido, cargá <b>tu recetario</b> (nombre, matrícula, firma): <a href="#" data-ir="config">ir a Configuración</a>.</div>
     <div class="card">
@@ -132,27 +156,7 @@
       <button class="boton chico secundario" id="btn-agregar-medicamento">+ Agregar medicamento</button>
     </div>
 
-    <div class="card" id="card-ia">
-      <h2>✨ Pedile cambios a la IA <small class="opcional">(opcional)</small></h2>
-      <p class="ayuda">Sobre lo cargado en pantalla, o sobre una receta o pedido viejo leído en el paso 1. Ej.: «cambiá el ibuprofeno por paracetamol 1 g cada 8 h», «pasalo a bilateral», «copiá los medicamentos de la receta vieja». <b>A la IA no le llega el nombre, el DNI, el afiliado ni el teléfono del paciente</b>, y antes de mandar ves exactamente qué sale.</p>
-      <div id="ia-sin-clave" class="alerta" hidden>Para usarlo, cargá tu clave gratuita en <a href="#" data-ir="config">Configuración › Asistente de IA</a>.</div>
-      <label>¿Qué querés cambiar?<textarea id="ia-pedido" rows="3" placeholder="Escribí o dictá con el micrófono del teclado"></textarea></label>
-      <label class="check"><input type="checkbox" id="ia-usar-doc" disabled> Usar el texto del documento leído en el paso 1</label>
-      <button class="boton" id="ia-revisar">Revisar qué se envía</button>
-      <div id="ia-envio" hidden>
-        <p class="ayuda"><b>Esto es todo lo que sale de este dispositivo.</b> Los datos del paciente aparecen como [PACIENTE]. Podés borrar o corregir el texto del documento antes de mandarlo.</p>
-        <pre id="ia-envio-pedido"></pre>
-        <label id="ia-envio-doc-caja">Texto del documento (editable)<textarea id="ia-envio-doc" rows="6"></textarea></label>
-        <div class="fila"><button class="boton" id="ia-enviar">Enviar a la IA</button><button class="boton secundario" id="ia-cancelar">Cancelar</button></div>
-      </div>
-      <div id="ia-propuesta" hidden>
-        <p class="ayuda"><b>Cambios propuestos:</b> marcá los que querés aplicar.</p>
-        <div id="ia-nota"></div>
-        <div id="ia-cambios"></div>
-        <div class="fila"><button class="boton" id="ia-aplicar">Aplicar los marcados</button><button class="boton secundario" id="ia-descartar">Descartar</button></div>
-      </div>
-      <div class="fila" id="ia-deshacer-fila" hidden><button class="boton chico secundario" id="ia-deshacer">↶ Deshacer los cambios de la IA</button></div>
-    </div>
+    <p class="ayuda" style="text-align:center"><a href="#" data-ir="asistente">✨ Pedile cambios a la IA</a> sobre este pedido</p>
 
     <div class="card">
       <h2>7. Generar y enviar</h2>
@@ -338,7 +342,8 @@
 </main>
 
 <nav class="abajo" id="nav" hidden>
-  <button data-vista="nuevo" class="activa"><span>📝</span>Nuevo</button>
+  <button data-vista="asistente" class="activa"><span>✨</span>Asistente</button>
+  <button data-vista="nuevo"><span>📝</span>Pedido</button>
   <button data-vista="pacientes"><span>👥</span>Pacientes</button>
   <button data-vista="kits"><span>🧰</span>Kits</button>
   <button data-vista="config"><span>⚙️</span>Configuración</button>
@@ -346,12 +351,12 @@
 
 <div id="leyendo" hidden><div class="card"><p id="leyendo-texto" class="cargando">Leyendo…</p><p class="ayuda">La primera vez se descarga el lector (~27 MB, una sola vez).</p></div></div>
 <div id="toast" hidden></div>
-<script src="config.js"></script>
-<script src="almacen.js"></script>
-<script src="lector.js"></script>
-<script src="catalogos.js"></script>
-<script src="recetario.js"></script>
-<script src="asistente.js"></script>
-<script src="app.js"></script>
+<script src="config.js?v=5"></script>
+<script src="almacen.js?v=5"></script>
+<script src="lector.js?v=5"></script>
+<script src="catalogos.js?v=5"></script>
+<script src="recetario.js?v=5"></script>
+<script src="asistente.js?v=5"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>

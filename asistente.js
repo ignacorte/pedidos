@@ -12,6 +12,9 @@ const Asistente = (() => {
     groq: { nombre: "Groq", url: "https://api.groq.com/openai/v1", modelo: "llama-3.3-70b-versatile", claves: "https://console.groq.com/keys", json: true },
   };
 
+  // Modelos abiertos de Groq, del mejor al más simple, por si el elegido deja de estar disponible
+  const PREFERIDOS = ["llama-3.3-70b-versatile", "openai/gpt-oss-120b", "moonshotai/kimi-k2-instruct", "qwen/qwen3-32b", "openai/gpt-oss-20b", "llama-3.1-8b-instant"];
+
   const INSTRUCCIONES = `Sos el asistente de un cirujano general argentino dentro de su app de pedidos médicos (estudios, materiales, autorización de cirugía, resumen de historia clínica y receta).
 Recibís el pedido actual en JSON, a veces el texto leído de un documento viejo (receta o pedido anterior, con posibles errores de lectura) y la indicación del médico.
 Devolvé SOLO un objeto JSON con exactamente las mismas claves que "pedido", con los cambios que pidió el médico aplicados y todo lo demás igual.
@@ -170,5 +173,5 @@ Agregá además la clave "_nota" con una frase corta para el médico si algo no 
     return ids.filter((id) => !/whisper|tts|guard|embed|vision|orpheus|playai|distil/i.test(id)).sort();
   }
 
-  return { PROVEEDORES, sinIdentidad, tapar, armarMensaje, fugas, proponer, limpiar, cambios, modelos, jsonDe };
+  return { PROVEEDORES, PREFERIDOS, sinIdentidad, tapar, armarMensaje, fugas, proponer, limpiar, cambios, modelos, jsonDe };
 })();

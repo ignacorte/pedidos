@@ -40,7 +40,7 @@ const INSTITUCION_VACIA = { nombre: "", pie: "", color_acento: "#092b50", color_
 const perfil = () => ({ medico: { ...MEDICO_VACIO, ...ajuste("medico", {}) }, institucion: { ...INSTITUCION_VACIA, ...ajuste("institucion", {}) }, imagenes: ajuste("imagenes", {}) });
 
 // ---------------- Vistas ----------------
-const TITULOS_VISTA = { nuevo: "Nuevo pedido", pacientes: "Pacientes", kits: "Kits", config: "Configuración", pin: "Pedidos", bienvenida: "Pedidos" };
+const TITULOS_VISTA = { asistente: "Asistente", nuevo: "Pedido", pacientes: "Pacientes", kits: "Kits", config: "Configuración", pin: "Pedidos", bienvenida: "Pedidos" };
 function ir(vista) {
   $$("main > section").forEach((s) => (s.hidden = s.id !== "v-" + vista));
   $$("nav.abajo button").forEach((b) => b.classList.toggle("activa", b.dataset.vista === vista));
@@ -50,7 +50,9 @@ function ir(vista) {
   if (vista === "pacientes") verPacientes();
   if (vista === "kits") verKits();
   if (vista === "config") verConfig();
-  if (vista === "nuevo") { $("#falta-perfil").hidden = !!perfil().medico.apellido; avisoIA().catch(() => {}); }
+  if (vista === "nuevo") $("#falta-perfil").hidden = !!perfil().medico.apellido;
+  if (vista === "asistente") { avisoIA().catch(() => {}); setTimeout(() => window.scrollTo(0, document.body.scrollHeight), 0); }
+  estado.vista = vista;
   window.scrollTo(0, 0);
 }
 
@@ -125,7 +127,7 @@ async function leerDocumentos() {
   const avance = (t) => ($("#leyendo-texto").textContent = t);
   try {
     const texto = await Lector.textoDe(estado.archivos, avance, { paginas: 6 });
-    estado.textoLeido = texto; $("#ia-usar-doc").disabled = !texto.trim();
+    estado.textoLeido = texto;
     const d = Catalogos.leer(texto, { kits: vivos("kits"), medico: perfil().medico });
     if (d.vacio) {
       $("#dudas").innerHTML = '<div class="alerta">No se reconocieron datos en las imágenes. Probá con una foto más nítida, de frente y con buena luz, o completá a mano.</div>';
@@ -460,15 +462,14 @@ function descargar(blob, nombre) {
   setTimeout(() => URL.revokeObjectURL(a.href), 10000);
 }
 
-function limpiarFormulario() {
+function limpiarFormulario({ chat = true } = {}) {
   $$("[data-campo]").forEach((el) => { el.value = ""; el.classList.remove("dudoso"); });
   ["#tabla-materiales tbody", "#tabla-estudios tbody", "#lista-medicamentos"].forEach((s) => ($(s).innerHTML = ""));
   $("#sel-kit").value = $("#sel-combo").value = "";
   $("#aviso-kit").innerHTML = $("#dudas").innerHTML = $("#estado-extraccion").innerHTML = "";
   estado.archivos = []; estado.secciones = null; renderMiniaturas();
   estado.textoLeido = ""; estado.ia = null; estado.antesIA = null;
-  $("#ia-pedido").value = ""; $("#ia-usar-doc").checked = false; $("#ia-usar-doc").disabled = true;
-  $("#ia-envio").hidden = $("#ia-propuesta").hidden = $("#ia-deshacer-fila").hidden = true;
+  if (chat) { estado.chatAdjuntos = []; $("#chat-mensajes").innerHTML = ""; $("#chat-texto").value = ""; renderAdjuntosChat(); }
   if (estado.ultimo) { URL.revokeObjectURL(estado.ultimo.url); URL.revokeObjectURL(estado.ultimo.urlPng); }
   estado.ultimo = null; estado.pedidoDe = {};
   $$("[data-generar]").forEach((b) => b.classList.remove("recomendado"));
@@ -476,6 +477,7 @@ function limpiarFormulario() {
   $("#sel-membrete").value = "personal"; estado.membreteElegido = ""; $("#chk-codigos").checked = false;
   actualizarMembrete();
   window.scrollTo(0, 0);
+  if (chat) estado.aplicarActualizacion?.();
 }
 
 // Carga en el formulario todos los datos de un pedido guardado (para repetirlo)
@@ -520,13 +522,19 @@ async function verIA() {
   $("#ia-estado").textContent = c.clave ? "Clave cargada en este dispositivo." : "Sin clave en este dispositivo.";
 }
 async function guardarIA() {
-  const clave = $("#ia-clave").value.trim(), modelo = $("#ia-modelo").value.trim() || Asistente.PROVEEDORES.groq.modelo;
+  const clave = $("#ia-clave").value.trim().replace(/\s+/g, "");
+  let modelo = $("#ia-modelo").value.trim() || Asistente.PROVEEDORES.groq.modelo;
   if (!clave) return toast("Pegá la clave de Groq (empieza con gsk_).");
   $("#ia-estado").textContent = "Probando la clave…";
   try {
     const ids = await Asistente.modelos({ proveedor: "groq", clave });
     $("#ia-modelos").innerHTML = ids.map((id) => `<option value="${esc(id)}">`).join("");
-    if (ids.length && !ids.includes(modelo)) throw new Error(`La clave anda, pero el modelo «${modelo}» no está disponible. Elegí uno de la lista (por ejemplo ${ids.slice(0, 3).join(", ")}).`);
+    // Si el modelo elegido ya no está (Groq los cambia), se usa el mejor disponible de los preferidos
+    if (ids.length && !ids.includes(modelo)) {
+      const otro = Asistente.PREFERIDOS.find((m) => ids.includes(m)) || ids.find((id) => /llama|gpt-oss|qwen|kimi/i.test(id)) || ids[0];
+      toast(`El modelo «${modelo}» no está disponible en Groq: se eligió «${otro}».`, 6000);
+      modelo = otro; $("#ia-modelo").value = otro;
+    }
     await Almacen.guardarSecreto("groq", clave);
     await Almacen.ajuste("ia_modelo", modelo);
     $("#ia-estado").textContent = "✓ Clave guardada en este dispositivo y probada.";
@@ -538,55 +546,138 @@ async function borrarIA() {
   await Almacen.guardarSecreto("groq", null);
   verIA(); toast("Clave borrada");
 }
-async function avisoIA() { $("#ia-sin-clave").hidden = !!(await Almacen.secreto("groq")); }
+async function avisoIA() { $("#chat-sin-clave").hidden = !!(await Almacen.secreto("groq")); }
 
-// Paso 1: mostrar exactamente lo que se va a mandar
-async function iaRevisar() {
-  const pedido = $("#ia-pedido").value.trim();
-  if (!pedido) return toast("Escribí qué querés cambiar.");
-  if (!(await Almacen.secreto("groq"))) { $("#ia-sin-clave").hidden = false; return toast("Falta tu clave de Groq (Configuración › Asistente de IA)."); }
-  const d = recolectar(), usarDoc = $("#ia-usar-doc").checked && estado.textoLeido;
-  const m = Asistente.armarMensaje(d, pedido, usarDoc ? estado.textoLeido : "");
-  $("#ia-envio-doc").value = m.documento_viejo || "";
-  $("#ia-envio-doc-caja").hidden = !usarDoc;
-  delete m.documento_viejo;
-  $("#ia-envio-pedido").textContent = JSON.stringify(m, null, 1);
-  estado.ia = { d, pedido };
-  $("#ia-envio").hidden = false; $("#ia-propuesta").hidden = true;
-  $("#ia-envio").scrollIntoView({ behavior: "smooth", block: "start" });
+// Chat: cada mensaje del médico puede traer archivos (se leen dentro del dispositivo y completan el pedido) y un texto con
+// lo que hay que cambiar. El pedido es siempre el del formulario («Pedido»): el chat solo lo modifica.
+function burbuja(quien, html) {
+  const el = document.createElement("div");
+  el.className = "msg msg-" + quien;
+  el.innerHTML = html;
+  $("#chat-mensajes").append(el);
+  el.scrollIntoView({ behavior: "smooth", block: "end" });
+  return el;
 }
-// Paso 2: mandar (lo mismo que se mostró, con el texto del documento tal como lo dejó el médico)
-async function iaEnviar() {
-  const b = $("#ia-enviar"), { d, pedido } = estado.ia || {};
-  if (!d) return;
-  const m = Asistente.armarMensaje(d, pedido, "");
-  if (!$("#ia-envio-doc-caja").hidden && $("#ia-envio-doc").value.trim()) m.documento_viejo = Asistente.tapar($("#ia-envio-doc").value, d.paciente, { renglones: true });
-  b.disabled = true; b.classList.add("cargando");
+function renderAdjuntosChat() {
+  const cont = $("#chat-adjuntos");
+  cont.innerHTML = "";
+  (estado.chatAdjuntos || []).forEach((f, i) => {
+    const c = document.createElement("span");
+    c.className = "chip";
+    c.innerHTML = `<span>${f.type === "application/pdf" ? "📄" : "🖼️"} ${esc(f.name || "foto")}</span><button class="quitar" title="Quitar">×</button>`;
+    $(".quitar", c).onclick = () => { estado.chatAdjuntos.splice(i, 1); renderAdjuntosChat(); };
+    cont.append(c);
+  });
+}
+const NOMBRES_DOC = { estudios: "Estudios", materiales: "Materiales", autorizacion: "Autorización", resumen: "Resumen HC", receta: "Receta" };
+
+async function enviarChat() {
+  const caja = $("#chat-texto"), texto = caja.value.trim(), archivos = [...(estado.chatAdjuntos || [])];
+  if (!texto && !archivos.length) return;
+  burbuja("yo", esc(texto) + archivos.map((f) => `<br><span class="adjunto">📎 ${esc(f.name || "foto")}</span>`).join(""));
+  caja.value = ""; caja.style.height = ""; estado.chatAdjuntos = []; renderAdjuntosChat();
+  const boton = $("#chat-enviar");
+  boton.disabled = true;
   try {
-    const propuesta = await Asistente.proponer(await confIA(), m, d);
-    estado.ia.propuesta = propuesta; estado.ia.antes = m.pedido;
-    const lista = Asistente.cambios(m.pedido, propuesta);
-    estado.ia.cambios = lista;
-    $("#ia-envio").hidden = true;
-    $("#ia-nota").innerHTML = propuesta.nota ? `<div class="alerta">${esc(propuesta.nota)}</div>` : "";
-    $("#ia-cambios").innerHTML = lista.length ? lista.map((c, i) => `<label class="check cambio-ia"><input type="checkbox" data-cambio="${i}" checked><span><b>${esc(c.titulo)}</b>${
+    let conDocumento = false;
+    if (archivos.length) {
+      const b = burbuja("app", '<span class="cargando">Leyendo dentro de este dispositivo…</span>');
+      const t = await Lector.textoDe(archivos, (x) => ($("span", b).textContent = x), { paginas: 6 });
+      const d = Catalogos.leer(t, { kits: vivos("kits"), medico: perfil().medico });
+      if (d.vacio || !t.trim()) { b.innerHTML = "No pude leer texto en ese archivo. Probá con una foto más nítida, de frente y con buena luz."; if (!texto) return; }
+      else {
+        b.innerHTML = "";
+        // ¿Es de otro paciente que el del pedido en pantalla? Preguntar antes de mezclar datos
+        const dniF = campo("paciente.dni").value.replace(/\D/g, ""), apF = Catalogos.normalizar(campo("paciente.apellido").value);
+        const otro = (dniF && d.paciente.dni && dniF !== d.paciente.dni) || (!dniF && apF && d.paciente.apellido && apF !== Catalogos.normalizar(d.paciente.apellido));
+        if (otro) {
+          b.innerHTML = `El documento es de <b>${esc(d.paciente.apellido || "otro paciente")}</b> y el pedido en pantalla es de <b>${esc(campo("paciente.apellido").value)}</b>.
+            <div class="fila"><button class="boton chico" data-r="nuevo">Empezar un pedido nuevo con el documento</button><button class="boton chico secundario" data-r="igual">Usarlo en este pedido</button></div>`;
+          const r = await new Promise((ok) => $$("[data-r]", b).forEach((x) => (x.onclick = () => ok(x.dataset.r))));
+          $(".fila", b).remove();
+          if (r === "nuevo") limpiarFormulario({ chat: false });
+        }
+        estado.textoLeido = t; conDocumento = true;
+        cargarLectura(d);
+        const p = d.paciente, c = d.clinica;
+        b.insertAdjacentHTML("beforeend", (otro ? "<br><br>" : "") + `Leí el documento (no salió de este dispositivo) y completé lo que faltaba en el pedido:<br>${[
+          (p.apellido || p.nombre) && `<b>Paciente:</b> ${esc([p.apellido, p.nombre].filter(Boolean).join(", "))}`,
+          d.cobertura.obra_social && `<b>Obra social:</b> ${esc(d.cobertura.obra_social)}`,
+          c.diagnostico && `<b>Diagnóstico:</b> ${esc(c.diagnostico)}`, c.procedimiento && `<b>Procedimiento:</b> ${esc(c.procedimiento)}`,
+        ].filter(Boolean).join("<br>")}${texto ? "" : "<br><br>¿Qué querés cambiar o pedir? (por ejemplo «copiá los medicamentos de la receta»)"}`);
+      }
+    }
+    if (!texto) return;
+    if (!(await Almacen.secreto("groq"))) {
+      burbuja("app", 'Para que la IA modifique el pedido falta tu clave gratuita de Groq: cargala en <a href="#" data-ir="config">Configuración › Asistente de IA</a>.');
+      return;
+    }
+    mostrarEnvio(texto, conDocumento || !!estado.textoLeido);
+  } catch (e) {
+    burbuja("app", `<span class="aviso-ia">⚠️ ${esc(e.message)}</span>`);
+  } finally { boton.disabled = false; }
+}
+
+// Antes de mandar: el médico ve exactamente lo que sale (y puede editar o quitar el texto del documento)
+function mostrarEnvio(pedido, hayDocumento) {
+  const d = recolectar(), m = Asistente.armarMensaje(d, pedido, hayDocumento ? estado.textoLeido : "");
+  const doc = m.documento_viejo || "";
+  delete m.documento_viejo;
+  const b = burbuja("app", `<b>🔒 Esto es todo lo que sale de este dispositivo.</b> Los datos del paciente van como [PACIENTE].
+    <details><summary>Ver el pedido que se manda</summary><pre>${esc(JSON.stringify(m, null, 1))}</pre></details>
+    ${doc ? `<label class="check" style="margin-top:6px"><input type="checkbox" class="usar-doc" checked> Mandar también el texto del documento leído</label>
+      <label class="caja-doc">Texto del documento (podés borrar lo que quieras)<textarea rows="5">${esc(doc)}</textarea></label>` : ""}
+    <div class="fila"><button class="boton chico enviar-ia">Enviar a la IA</button><button class="boton chico secundario cancelar-ia">Cancelar</button></div>`);
+  $(".usar-doc", b)?.addEventListener("change", (e) => ($(".caja-doc", b).hidden = !e.target.checked));
+  $(".cancelar-ia", b).onclick = () => { b.innerHTML = "Cancelado: no se mandó nada."; };
+  $(".enviar-ia", b).onclick = async () => {
+    const boton = $(".enviar-ia", b);
+    const final = Asistente.armarMensaje(d, pedido, "");
+    const usar = $(".usar-doc", b)?.checked, texto = $(".caja-doc textarea", b)?.value.trim();
+    if (usar && texto) final.documento_viejo = Asistente.tapar(texto, d.paciente, { renglones: true });
+    boton.disabled = true; boton.classList.add("cargando");
+    try {
+      const propuesta = await Asistente.proponer(await confIA(), final, d);
+      b.innerHTML = "✓ Enviado (sin datos del paciente).";
+      mostrarPropuesta(final.pedido, propuesta);
+    } catch (e) {
+      boton.disabled = false; boton.classList.remove("cargando");
+      burbuja("app", `<span class="aviso-ia">⚠️ ${esc(e.message)}</span>`);
+    }
+  };
+}
+
+// Cambios propuestos: cada uno con su casilla; se aplica solo lo marcado
+function mostrarPropuesta(antes, propuesta) {
+  const lista = Asistente.cambios(antes, propuesta);
+  if (!lista.length) return burbuja("app", `La IA no propuso cambios.${propuesta.nota ? " " + esc(propuesta.nota) : ""} Probá explicarlo de otra forma.`);
+  const b = burbuja("app", `<b>Cambios propuestos</b> (marcá los que querés):${propuesta.nota ? `<div class="alerta" style="margin:6px 0">${esc(propuesta.nota)}</div>` : ""}
+    ${lista.map((c, i) => `<label class="check cambio-ia"><input type="checkbox" data-cambio="${i}" checked><span><b>${esc(c.titulo)}</b>${
       c.ruta.includes(".") || c.ruta === "observaciones" || c.ruta === "obra_social"
         ? `<br><del>${esc(c.antes || "(vacío)")}</del><br><ins>${esc(c.despues || "(vacío)")}</ins>`
         : c.igual ? "<br>cambia el orden o el detalle de las filas"
         : `${c.quita.map((x) => `<br><del>− ${esc(x)}</del>`).join("")}${c.agrega.map((x) => `<br><ins>+ ${esc(x)}</ins>`).join("")}`}${
-      /\[PACIENTE\]/.test(JSON.stringify(c)) ? '<br><small class="aviso-ia">Tiene [PACIENTE]: reemplazalo a mano después de aplicar.</small>' : ""}</span></label>`).join("")
-      : "<p class='ayuda'>La IA no propuso cambios. Probá explicarlo de otra forma.</p>";
-    $("#ia-aplicar").hidden = !lista.length;
-    $("#ia-propuesta").hidden = false;
-  } catch (e) {
-    toast(e.message, 7000);
-  } finally { b.disabled = false; b.classList.remove("cargando"); }
+      /\[PACIENTE\]/.test(JSON.stringify(c)) ? '<br><small class="aviso-ia">Tiene [PACIENTE]: reemplazalo a mano después de aplicar.</small>' : ""}</span></label>`).join("")}
+    <div class="fila"><button class="boton chico aplicar-ia">Aplicar</button><button class="boton chico secundario descartar-ia">Descartar</button></div>`);
+  $(".descartar-ia", b).onclick = () => { $$(".fila, input", b).forEach((x) => (x.disabled = true)); $(".fila", b).remove(); burbuja("app", "Descartado: el pedido quedó como estaba."); };
+  $(".aplicar-ia", b).onclick = () => {
+    const elegidos = $$("[data-cambio]", b).filter((el) => el.checked).map((el) => lista[+el.dataset.cambio]);
+    if (!elegidos.length) return toast("No marcaste ningún cambio.");
+    aplicarCambios(elegidos, propuesta);
+    $$("input", b).forEach((x) => (x.disabled = true)); $(".fila", b).remove();
+    const r = burbuja("app", `✓ Apliqué ${elegidos.length === 1 ? "el cambio" : elegidos.length + " cambios"} (quedan resaltados en el pedido). ¿Qué generamos?
+      <div class="fila">${Object.entries(NOMBRES_DOC).map(([t, n]) => `<button class="boton chico" data-doc="${t}">${n}</button>`).join("")}</div>
+      <div class="fila"><button class="boton chico secundario ver-pedido">Ver el pedido completo</button><button class="boton chico secundario deshacer-ia">↶ Deshacer</button></div>`);
+    $$("[data-doc]", r).forEach((x) => (x.onclick = async () => {
+      ir("nuevo");
+      await generar(x.dataset.doc, $(`#v-nuevo [data-generar="${x.dataset.doc}"]`));
+      if (!$("#resultado").hidden) $("#resultado").scrollIntoView({ block: "start" });
+    }));
+    $(".ver-pedido", r).onclick = () => ir("nuevo");
+    $(".deshacer-ia", r).onclick = () => { iaDeshacer(); $(".deshacer-ia", r).remove(); burbuja("app", "Listo: volví el pedido a como estaba antes de la IA."); };
+  };
 }
-// Paso 3: aplicar solo lo marcado (queda resaltado para revisar; se puede deshacer)
-function iaAplicar() {
-  const { propuesta, cambios } = estado.ia || {};
-  const elegidos = $$("[data-cambio]:checked").map((el) => cambios[+el.dataset.cambio]);
-  if (!elegidos.length) return toast("No marcaste ningún cambio.");
+function aplicarCambios(elegidos, propuesta) {
   estado.antesIA = { datos: recolectar(), rutas: elegidos.map((c) => c.ruta) };
   for (const c of elegidos) ponerCampo(c.ruta, propuesta, true);
   if (elegidos.some((c) => c.ruta === "clinica.diagnostico") && !elegidos.some((c) => c.ruta === "clinica.cie10")) {
@@ -594,8 +685,6 @@ function iaAplicar() {
     if (nuevo !== el.value) { el.value = nuevo; el.classList.add("dudoso"); estado.antesIA.rutas.push("clinica.cie10"); }
   }
   actualizarMembrete();
-  $("#ia-propuesta").hidden = true; $("#ia-deshacer-fila").hidden = false; $("#ia-pedido").value = "";
-  toast("Cambios aplicados: quedaron resaltados, revisalos antes de generar.", 5000);
 }
 // Escribe en el formulario un campo o una lista, desde lo propuesto por la IA o desde una copia de antes
 function ponerCampo(ruta, origen, deIA) {
@@ -625,8 +714,7 @@ function iaDeshacer() {
   for (const r of a.rutas) ponerCampo(r, a.datos, false);
   $$(".dudoso").forEach((el) => el.classList.remove("dudoso"));
   actualizarMembrete();
-  estado.antesIA = null; $("#ia-deshacer-fila").hidden = true;
-  toast("Se volvió a como estaba antes de la IA.");
+  estado.antesIA = null;
 }
 
 // ---------------- Pacientes (de los pedidos guardados) ----------------
@@ -862,8 +950,8 @@ function entrar() {
   mostrarSync(Almacen.estado);
   const listo = () => { renderSelectorKits(); renderCombos(); actualizarMembrete(); };
   listo();
-  if (!entro) ir(perfil().medico.apellido ? "nuevo" : "config");
-  else ir("nuevo");
+  if (!entro) ir(perfil().medico.apellido ? "asistente" : "config");
+  else ir(["asistente", "nuevo", "pacientes", "kits", "config"].includes(estado.vista) ? estado.vista : "asistente");
   if (!perfil().medico.apellido && !entro) toast("Primero cargá tu recetario: nombre, matrícula y firma.", 5000);
   entro = true;
   // Al entrar: traer lo cargado en otros dispositivos (kits, combos, perfil) y después sembrar lo inicial si hace falta
@@ -921,25 +1009,28 @@ function configurarSeguridad() {
 }
 
 // ---------------- Actualizaciones de la app ----------------
-const VERSION_APP = "4"; // igual que VERSION en sw.js
+const VERSION_APP = "5"; // igual que VERSION en sw.js
 function registrarActualizaciones() {
   if (!("serviceWorker" in navigator)) return;
   const habia = !!navigator.serviceWorker.controller;
   let reg = null, pendiente = false, ultimaBusqueda = 0;
   const buscar = () => { if (!reg || Date.now() - ultimaBusqueda < 10e3) return; ultimaBusqueda = Date.now(); reg.update().catch(() => {}); };
-  // Se aplica sola si no hay un pedido a medio cargar; si no, se avisa y se aplica al volver a entrar
-  const ocupado = () => !$("#v-nuevo").hidden && $$("[data-campo]").some((el) => el.value.trim());
+  // Se aplica sola (recarga) si no hay nada a medio hacer; si hay un pedido o una charla con el asistente en curso, se
+  // aplica al limpiar el pedido o al volver a la app con todo vacío (nunca se pierde lo cargado)
+  const ocupado = () => $$("[data-campo]").some((el) => el.value.trim()) || !!$("#chat-mensajes").children.length || !!$("#chat-texto").value.trim();
+  estado.aplicarActualizacion = () => { if (pendiente && !ocupado()) location.reload(); };
   navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then((r) => { reg = r; buscar(); }).catch(() => {});
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     if (!habia) return;
     pendiente = true;
-    if (!ocupado()) location.reload(); else toast("Hay una versión nueva: se aplica al terminar este pedido (o en «Buscar actualización»).", 6000);
+    if (!ocupado()) location.reload(); else toast("Hay una versión nueva: se aplica sola cuando limpies este pedido.", 6000);
   });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") return;
     if (pendiente && !ocupado()) location.reload(); else buscar();
   });
-  setInterval(buscar, 30 * 60e3);
+  setInterval(buscar, 10 * 60e3);
+  window.addEventListener("online", buscar);
 }
 async function actualizarAhora() {
   try {
@@ -951,6 +1042,12 @@ async function actualizarAhora() {
 
 // ---------------- Inicio ----------------
 async function arrancar() {
+  // Archivos de versiones distintas (caché del navegador): se fuerza una vez la versión nueva completa
+  if (typeof Almacen.secreto !== "function" || typeof Asistente === "undefined") {
+    if (!sessionStorage.getItem("ped_recarga")) { sessionStorage.setItem("ped_recarga", "1"); return actualizarAhora(); }
+    throw new Error("la app quedó a medio actualizar. Cerrala y abrila de nuevo (en la computadora: Ctrl + Shift + R).");
+  }
+  sessionStorage.removeItem("ped_recarga");
   const vuelta = Almacen.recibirToken(); // {ok} | {error} | null
   await Promise.all([Almacen.iniciar(), Catalogos.cargar()]);
   Almacen.alCambiar = mostrarSync;
@@ -963,9 +1060,10 @@ async function arrancar() {
   $("#in-camara").addEventListener("change", (e) => { agregarArchivos(e.target.files); e.target.value = ""; });
   $("#in-archivos").addEventListener("change", (e) => { agregarArchivos(e.target.files); e.target.value = ""; });
   document.addEventListener("paste", (e) => {
-    if ($("#v-nuevo").hidden) return;
     const imgs = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith("image/"));
-    if (imgs.length) { agregarArchivos(imgs); toast("Captura agregada"); }
+    if (!imgs.length) return;
+    if (!$("#v-asistente").hidden) { estado.chatAdjuntos = [...(estado.chatAdjuntos || []), ...imgs]; renderAdjuntosChat(); toast("Captura agregada"); }
+    else if (!$("#v-nuevo").hidden) { agregarArchivos(imgs); toast("Captura agregada"); }
   });
   $("#btn-extraer").addEventListener("click", leerDocumentos);
   document.addEventListener("input", (e) => e.target.classList?.remove("dudoso"));
@@ -977,12 +1075,13 @@ async function arrancar() {
   $("#btn-borrar-combo").addEventListener("click", borrarCombo);
   $("#btn-agregar-medicamento").addEventListener("click", () => agregarMedicamento());
   $("#btn-armar-resumen").addEventListener("click", armarResumen);
-  $("#ia-revisar").addEventListener("click", () => iaRevisar().catch((e) => toast(e.message)));
-  $("#ia-enviar").addEventListener("click", iaEnviar);
-  $("#ia-cancelar").addEventListener("click", () => ($("#ia-envio").hidden = true));
-  $("#ia-aplicar").addEventListener("click", iaAplicar);
-  $("#ia-descartar").addEventListener("click", () => ($("#ia-propuesta").hidden = true));
-  $("#ia-deshacer").addEventListener("click", iaDeshacer);
+  $("#chat-archivo").addEventListener("change", (e) => { estado.chatAdjuntos = [...(estado.chatAdjuntos || []), ...e.target.files]; e.target.value = ""; renderAdjuntosChat(); $("#chat-texto").focus(); });
+  $("#chat-enviar").addEventListener("click", () => enviarChat());
+  $("#chat-texto").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !matchMedia("(pointer: coarse)").matches) { e.preventDefault(); enviarChat(); } });
+  $("#chat-texto").addEventListener("input", (e) => { e.target.style.height = ""; e.target.style.height = Math.min(e.target.scrollHeight, 140) + "px"; });
+  $$("[data-ejemplo]").forEach((b) => b.addEventListener("click", () => { $("#chat-texto").value = b.dataset.ejemplo; $("#chat-texto").focus(); }));
+  // Enlaces a otra vista dentro de los mensajes del chat
+  $("#chat-mensajes").addEventListener("click", (e) => { const a = e.target.closest("[data-ir]"); if (a) { e.preventDefault(); ir(a.dataset.ir); } });
   $("#ia-guardar").addEventListener("click", guardarIA);
   $("#ia-borrar").addEventListener("click", () => borrarIA().catch((e) => toast(e.message)));
   $$("[data-generar]").forEach((b) => b.addEventListener("click", () => generar(b.dataset.generar, b)));
