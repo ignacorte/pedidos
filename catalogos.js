@@ -80,12 +80,17 @@ const Catalogos = (() => {
   function cie10De(diagnostico) {
     const p = palabrasDe(diagnostico);
     if (!p.size) return null;
+    // La primera palabra del diagnóstico (lo que es: «colelitiasis», «hernia», «colecciones») tiene que coincidir: si no,
+    // una palabra suelta como «hepática» proponía «C22.0 carcinoma de hígado» para «colecciones hepáticas»
+    const primera = [...p][0];
     let mejor = null, n = 0;
     for (const d of cie10) {
-      const c = [...palabrasDe(d.descripcion)].filter((w) => p.has(w)).length;
+      const w = palabrasDe(d.descripcion);
+      if (!w.has(primera)) continue;
+      const c = [...w].filter((x) => p.has(x)).length;
       if (c > n) { mejor = d; n = c; }
     }
-    return n >= 1 ? mejor : null; // el médico lo ve resaltado y lo corrige
+    return mejor; // el médico lo ve resaltado y lo corrige
   }
   const descripcionCie10 = (codigo) => cie10.find((d) => d.codigo === codigo)?.descripcion || "";
 
@@ -113,7 +118,15 @@ const Catalogos = (() => {
     let [apellido, ...resto] = (p.paciente || "").split(",");
     let nombre = resto.join(",").trim();
     apellido = (apellido || "").trim();
-    if (apellido && !nombre && apellido.includes(" ")) {
+    // Recetario generado por esta app (o uno con el mismo formato): «Paciente: Nombre Apellido», sin coma
+    const propio = /^\s*Rp\s*\/?\s*$/im.test(texto) && /^\s*Fecha\s*:/im.test(texto);
+    if (propio && apellido && !nombre && apellido.includes(" ")) {
+      const w = apellido.split(/\s+/);
+      let n = w.length - 1;
+      while (n > 1 && /^(del?|la|las|los|di|da|van|von|mac|mc|san|santa)$/i.test(w[n - 1])) n--;
+      nombre = w.slice(0, n).join(" "); apellido = w.slice(n).join(" ");
+      dudas.push("Nombre y apellido tomados en el orden del recetario («Nombre Apellido»): revisalos.");
+    } else if (apellido && !nombre && apellido.includes(" ")) {
       const w = apellido.split(/\s+/);
       let n = 1;
       while (n < w.length - 1 && (w[n - 1].length <= 3 || /^(del?|la|las|los|di|da|van|von|mac|mc|san|santa)$/i.test(w[n - 1]))) n++;
@@ -128,7 +141,8 @@ const Catalogos = (() => {
     const nac = (texto.match(/(?:nac(?:imiento)?|f\.?\s*nac\.?)[^\d\n]{0,15}(\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4})/i) || [])[1] || "";
     const tel = (texto.match(/(?:tel(?:[eé]fono)?|cel(?:ular)?|whatsapp)\.?\s*:?\s*(\+?[\d \t()-]{8,18}\d)/i) || [])[1] || "";
     // Diagnóstico: el del documento (corto) y su código CIE-10
-    let diagnostico = (p.diagnostico || "").replace(/\s{2,}.*$/, "").trim();
+    const sinCasilla = (t) => (t || "").replace(/\s+(?:vol|obl)\.?\s*$/i, "").trim(); // casillas «Vol.» / «Obl.» del recetario
+    let diagnostico = sinCasilla((p.diagnostico || "").replace(/\s{2,}.*$/, ""));
     let cie = (texto.match(/\b([A-TV-Z]\d{2}(?:\.\d{1,2})?)\b/) || [])[1] || "";
     if (cie && !descripcionCie10(cie)) cie = "";
     if (!cie && diagnostico) cie = cie10De(diagnostico)?.codigo || "";
@@ -136,7 +150,7 @@ const Catalogos = (() => {
     // Procedimiento propuesto: «Plan: …», «Cirugía propuesta: …», «Se indica …»
     let procedimiento = "";
     const QUIRURGICO = /ectom|plast|rrafia|cirug|laparosc|videolap|hernio|colecist|apendic|ex[eé]resis|resecci|funduplic|bypass|manga|gastrect|tiroid|mastect|cuadrantect|biopsia|drenaje|ostom|otom|sutura|amputa|hemorroid|fistul|fisur|quiste|lipoma|eventr|colect|anastom|nissen|toracosc|endosc|vcc|veda/i;
-    const prop = renglones.map((l) => l.match(/(?:cirug[ií]a (?:propuesta|indicada|programada)|operaci[oó]n propuesta|\bplan(?: quir[uú]rgico)?\s*:|\bse (?:indica|propone|programa)\b|indicaci[oó]n quir[uú]rgica)\s*:?\s*(.{4,90})/i))
+    const prop = renglones.map((l) => l.match(/(?:autorizaci[oó]n (?:para|de)\s*:?|cirug[ií]a (?:propuesta|indicada|programada)|operaci[oó]n propuesta|\bplan(?: quir[uú]rgico)?\s*:|\bse (?:indica|propone|programa)\b|indicaci[oó]n quir[uú]rgica)\s*:?\s*(.{4,90})/i))
       .find((m) => m && (!/^se /i.test(m[0].trim()) && !/^plan/i.test(m[0].trim()) || QUIRURGICO.test(m[1])));
     if (prop) procedimiento = prop[1].replace(/^(?:una|la|el)\s+/i, "").replace(/[.;]\s*$/, "").trim();
     else if (p.procedimientos?.[0]) procedimiento = p.procedimientos[0];
@@ -149,10 +163,13 @@ const Catalogos = (() => {
       const m = l.match(/^(?:(?:solicito|se solicita[n]?|pido|pedir|solicitar)\s*:?|estudios(?: a solicitar)?\s*:)\s*(.*)$/i);
       if (!m) return;
       const lista = [m[1], ...renglones.slice(i + 1, i + 8).filter((x) => /^(?:[-•*·]|\d{1,2}[.)])\s*[A-Za-zÁÉÍÓÚÑáéíóúñ]/.test(x)).map((x) => x.replace(/^(?:[-•*·]|\d{1,2}[.)])\s*/, ""))];
+      if (/autorizaci[oó]n/i.test(m[1])) return; // «Solicito: Autorización para …» es el procedimiento, no un estudio
       for (const x of lista.join(",").split(/[,;+]|\s+y\s+/)) if (x.trim().length > 2) estudiosTexto.push(x.trim());
     });
     const estudios = [], sinCodigo = [];
-    let conPrequirurgico = cirugia;
+    // Un recetario ya hecho (para repetirlo o modificarlo): se sugiere solo ese mismo documento, sin prequirúrgico ni kit
+    const esAutorizacion = /autorizaci[oó]n (?:para|de)/i.test(texto);
+    let conPrequirurgico = cirugia && !propio;
     for (const t of estudiosTexto) {
       if (/prequir/i.test(t)) { conPrequirurgico = true; continue; }
       const pr = mejorPractica(t);
@@ -161,19 +178,22 @@ const Catalogos = (() => {
       else { estudios.push({ codigo: "", descripcion: t }); sinCodigo.push(t); }
     }
     if (sinCodigo.length) dudas.push("Sin código en el nomenclador (completar): " + sinCodigo.join(", "));
-    const kit = cirugia ? kitDe(procedimiento, kits) : null;
+    const kit = cirugia && !propio ? kitDe(procedimiento, kits) : null;
     const documentos = [];
     if (conPrequirurgico || estudios.length) documentos.push("estudios");
-    if (cirugia) documentos.push("materiales", "autorizacion");
+    if (propio) { if (esAutorizacion) documentos.push("autorizacion"); }
+    else if (cirugia) documentos.push("materiales", "autorizacion");
     if (p.dni && !/^\d{7,8}$/.test(p.dni)) dudas.push(`DNI con formato raro (${p.dni}): verificalo.`);
     const sec = secciones(renglones);
     const sx = (texto.match(/\bsexo\s*:?\s*(femenino|masculino|f|m)\b/i) || [])[1] || "";
     const sexo = /^f/i.test(sx) ? "femenino" : /^m/i.test(sx) ? "masculino" : "";
+    const car = (texto.match(/car[aá]cter\s*:?\s*(urgencia|programad[oa])/i) || [])[1] || "";
+    const caracter = /^u/i.test(car) ? "Urgencia" : car ? "Programada" : "";
     const leido = { apellido, nombre, dni: p.dni, nac, tel, os: p.obra_social_texto, afiliado: p.afiliado || p.afiliadoPorForma, diagnostico, cie, procedimiento };
     return {
       paciente: { apellido: mayus(apellido), nombre: titulo(nombre), dni: p.dni || "", fecha_nacimiento: nac.replace(/[.-]/g, "/"), telefono: tel.replace(/\s+/g, " ").trim() },
-      cobertura: { obra_social: obraSocialCanonica(p.obra_social_texto || ""), nro_afiliado: (p.afiliado || p.afiliadoPorForma || "").trim() },
-      clinica: { diagnostico: sinGritar(diagnostico), cie10: cie, procedimiento: sinGritar(procedimiento) },
+      cobertura: { obra_social: obraSocialCanonica(p.obra_social_texto || ""), nro_afiliado: sinCasilla(p.afiliado || p.afiliadoPorForma || "") },
+      clinica: { diagnostico: sinGritar(diagnostico), cie10: cie, procedimiento: sinGritar(procedimiento), caracter },
       kit_sugerido: kit?.id || "",
       recomendacion: { combo: conPrequirurgico ? "prequirurgico-pami" : "", estudios, documentos },
       vacio: !Object.values(leido).some(Boolean) && !estudios.length,

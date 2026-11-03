@@ -144,6 +144,15 @@ async function leerDocumentos() {
 }
 
 function cargarLectura(d) {
+  // Paciente ya conocido (mismo DNI en Pacientes): sus datos guardados valen más que lo leído (orden nombre/apellido, etc.)
+  const dni = (d.paciente.dni || "").replace(/\D/g, "");
+  const conocido = dni && pacientes().find((x) => x.clave === dni)?.ultimo.datos;
+  if (conocido) {
+    const c = datosCompletos(conocido);
+    d.paciente = { ...d.paciente, ...Object.fromEntries(Object.entries(c.paciente).filter(([, v]) => v)) };
+    d.cobertura = { ...d.cobertura, ...Object.fromEntries(Object.entries(c.cobertura).filter(([, v]) => v)) };
+    d.dudas = d.dudas.filter((x) => !x.startsWith("Nombre y apellido tomados")).concat("Paciente que ya estaba en Pacientes: se usaron sus datos guardados.");
+  }
   // Solo completa campos vacíos: no pisa lo que el médico ya escribió
   for (const grupo of ["paciente", "cobertura", "clinica"]) {
     for (const [k, v] of Object.entries(d[grupo] || {})) {
@@ -650,7 +659,10 @@ function mostrarEnvio(pedido, hayDocumento) {
 // Cambios propuestos: cada uno con su casilla; se aplica solo lo marcado
 function mostrarPropuesta(antes, propuesta) {
   const lista = Asistente.cambios(antes, propuesta);
-  if (!lista.length) return burbuja("app", `La IA no propuso cambios.${propuesta.nota ? " " + esc(propuesta.nota) : ""} Probá explicarlo de otra forma.`);
+  if (!lista.length) {
+    const r = burbuja("app", `No hay nada que cambiar en el pedido.${propuesta.nota ? " " + esc(propuesta.nota) : ""}<br>Al generar, el documento sale con la fecha de hoy:${botonesGenerar()}`);
+    return conectarGenerar(r);
+  }
   const b = burbuja("app", `<b>Cambios propuestos</b> (marcá los que querés):${propuesta.nota ? `<div class="alerta" style="margin:6px 0">${esc(propuesta.nota)}</div>` : ""}
     ${lista.map((c, i) => `<label class="check cambio-ia"><input type="checkbox" data-cambio="${i}" checked><span><b>${esc(c.titulo)}</b>${
       c.ruta.includes(".") || c.ruta === "observaciones" || c.ruta === "obra_social"
@@ -665,17 +677,21 @@ function mostrarPropuesta(antes, propuesta) {
     if (!elegidos.length) return toast("No marcaste ningún cambio.");
     aplicarCambios(elegidos, propuesta);
     $$("input", b).forEach((x) => (x.disabled = true)); $(".fila", b).remove();
-    const r = burbuja("app", `✓ Apliqué ${elegidos.length === 1 ? "el cambio" : elegidos.length + " cambios"} (quedan resaltados en el pedido). ¿Qué generamos?
-      <div class="fila">${Object.entries(NOMBRES_DOC).map(([t, n]) => `<button class="boton chico" data-doc="${t}">${n}</button>`).join("")}</div>
-      <div class="fila"><button class="boton chico secundario ver-pedido">Ver el pedido completo</button><button class="boton chico secundario deshacer-ia">↶ Deshacer</button></div>`);
-    $$("[data-doc]", r).forEach((x) => (x.onclick = async () => {
-      ir("nuevo");
-      await generar(x.dataset.doc, $(`#v-nuevo [data-generar="${x.dataset.doc}"]`));
-      if (!$("#resultado").hidden) $("#resultado").scrollIntoView({ block: "start" });
-    }));
-    $(".ver-pedido", r).onclick = () => ir("nuevo");
+    const r = burbuja("app", `✓ Apliqué ${elegidos.length === 1 ? "el cambio" : elegidos.length + " cambios"} (quedan resaltados en el pedido). ¿Qué generamos? (sale con la fecha de hoy)${botonesGenerar()}
+      <div class="fila"><button class="boton chico secundario deshacer-ia">↶ Deshacer</button></div>`);
+    conectarGenerar(r);
     $(".deshacer-ia", r).onclick = () => { iaDeshacer(); $(".deshacer-ia", r).remove(); burbuja("app", "Listo: volví el pedido a como estaba antes de la IA."); };
   };
+}
+const botonesGenerar = () => `<div class="fila">${Object.entries(NOMBRES_DOC).map(([t, n]) => `<button class="boton chico" data-doc="${t}">${n}</button>`).join("")}</div>
+  <div class="fila"><button class="boton chico secundario ver-pedido">Ver el pedido completo</button></div>`;
+function conectarGenerar(r) {
+  $$("[data-doc]", r).forEach((x) => (x.onclick = async () => {
+    ir("nuevo");
+    await generar(x.dataset.doc, $(`#v-nuevo [data-generar="${x.dataset.doc}"]`));
+    if (!$("#resultado").hidden) $("#resultado").scrollIntoView({ block: "start" });
+  }));
+  $(".ver-pedido", r).onclick = () => ir("nuevo");
 }
 function aplicarCambios(elegidos, propuesta) {
   estado.antesIA = { datos: recolectar(), rutas: elegidos.map((c) => c.ruta) };
@@ -1009,7 +1025,7 @@ function configurarSeguridad() {
 }
 
 // ---------------- Actualizaciones de la app ----------------
-const VERSION_APP = "6"; // igual que VERSION en sw.js
+const VERSION_APP = "7"; // igual que VERSION en sw.js
 function registrarActualizaciones() {
   if (!("serviceWorker" in navigator)) return;
   const habia = !!navigator.serviceWorker.controller;

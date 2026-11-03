@@ -18,6 +18,11 @@ const Asistente = (() => {
   const INSTRUCCIONES = `Sos el asistente de un cirujano general argentino dentro de su app de pedidos médicos (estudios, materiales, autorización de cirugía, resumen de historia clínica y receta).
 Recibís el pedido actual en JSON, a veces el texto leído de un documento viejo (receta o pedido anterior, con posibles errores de lectura) y la indicación del médico.
 Devolvé SOLO un objeto JSON con exactamente las mismas claves que "pedido", con los cambios que pidió el médico aplicados y todo lo demás igual.
+Dónde va cada cosa:
+- Autorización de cirugía o procedimiento («Solicito: Autorización para X»): X va en clinica.procedimiento; también usa clinica.caracter y clinica.lateralidad. «Cambiá la autorización para Y» = poner Y en clinica.procedimiento (redactado como procedimiento médico completo y correcto).
+- Pedido de estudios: la lista "estudios". Pedido de materiales: la lista "materiales". Receta: la lista "medicamentos".
+- Resumen de historia clínica: autorizacion.fundamento y autorizacion.resumen_estudios.
+- La FECHA DEL DOCUMENTO no es un campo: al generar el documento sale sola con la fecha de hoy ("hoy"). Si piden «fecha de hoy» o «actualizar la fecha», no cambies nada por eso y explicalo en "_nota". autorizacion.fecha_probable es solo la fecha probable de la cirugía.
 Reglas:
 - Cambiá únicamente lo que se pide. No inventes datos clínicos que nadie mencionó.
 - Si te piden tomar algo del documento viejo (por ejemplo «copiá los medicamentos de la receta»), pasalo a los campos que correspondan.
@@ -25,12 +30,12 @@ Reglas:
 - Estudios y materiales: una fila por ítem. En estudios nuevos dejá "codigo" vacío (la app lo busca en el nomenclador). En materiales "cantidad" es texto.
 - Si cambia el diagnóstico, dejá "cie10" vacío (la app lo recalcula).
 - lateralidad solo puede ser "", "Derecha", "Izquierda" o "Bilateral"; caracter solo "", "Programada" o "Urgencia".
-- Fechas DD/MM/AAAA. Castellano rioplatense, terminología médica correcta.
+- Fechas DD/MM/AAAA ("hoy" trae la fecha de hoy, para «mañana», «en 15 días», etc.). Castellano rioplatense, terminología médica correcta, con tildes.
 - "[PACIENTE]" reemplaza los datos personales del paciente: dejalo tal cual.
 Agregá además la clave "_nota" con una frase corta para el médico si algo no se pudo hacer o hay que revisarlo; si no, "".`;
 
   const CAMPOS = { clinica: ["diagnostico", "cie10", "procedimiento", "lateralidad", "caracter"], autorizacion: ["fecha_probable", "fundamento", "resumen_estudios"] };
-  const NOMBRES = { diagnostico: "Diagnóstico", cie10: "CIE-10", procedimiento: "Procedimiento", lateralidad: "Lateralidad", caracter: "Carácter",
+  const NOMBRES = { diagnostico: "Diagnóstico", cie10: "CIE-10", procedimiento: "Procedimiento (autorización)", lateralidad: "Lateralidad", caracter: "Carácter",
     fecha_probable: "Fecha probable", fundamento: "Resumen clínico", resumen_estudios: "Resumen de estudios", observaciones: "Observaciones",
     obra_social: "Obra social", estudios: "Estudios", materiales: "Materiales", medicamentos: "Medicamentos" };
 
@@ -68,7 +73,8 @@ Agregá además la clave "_nota" con una frase corta para el médico si algo no 
     for (const g of ["clinica", "autorizacion"]) for (const k in pedido[g]) pedido[g][k] = tapar(pedido[g][k], d.paciente);
     pedido.observaciones = tapar(pedido.observaciones, d.paciente);
     pedido.obra_social = tapar(pedido.obra_social, d.paciente);
-    const partes = { pedido, indicacion: tapar(instruccion, d.paciente) };
+    const h = new Date(), hoy = `${String(h.getDate()).padStart(2, "0")}/${String(h.getMonth() + 1).padStart(2, "0")}/${h.getFullYear()}`;
+    const partes = { hoy, pedido, indicacion: tapar(instruccion, d.paciente) };
     if (textoViejo) partes.documento_viejo = tapar(textoViejo, d.paciente, { renglones: true }).slice(0, 6000);
     return partes;
   }
