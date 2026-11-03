@@ -642,42 +642,28 @@ async function enviarChat() {
       burbuja("app", 'Para que la IA modifique el pedido falta tu clave gratuita de Groq: cargala en <a href="#" data-ir="config">Configuración › Asistente de IA</a>.');
       return;
     }
-    mostrarEnvio(texto, conDocumento || !!estado.textoLeido);
+    await mostrarEnvio(texto, conDocumento || !!estado.textoLeido);
   } catch (e) {
     burbuja("app", `<span class="aviso-ia">⚠️ ${esc(e.message)}</span>`);
   } finally { boton.disabled = false; }
 }
 
-// Antes de mandar: el médico ve exactamente lo que sale (y puede editar o quitar el texto del documento)
-function mostrarEnvio(pedido, hayDocumento) {
-  const d = recolectar(), m = Asistente.armarMensaje(d, pedido, hayDocumento ? estado.textoLeido : "", membrete());
-  const doc = m.documento_viejo || "";
-  delete m.documento_viejo;
-  const b = burbuja("app", `<b>🔒 Esto es todo lo que sale de este dispositivo.</b> Los datos del paciente van como [PACIENTE].
-    <details><summary>Ver el pedido que se manda</summary><pre>${esc(JSON.stringify(m, null, 1))}</pre></details>
-    ${doc ? `<label class="check" style="margin-top:6px"><input type="checkbox" class="usar-doc"${estado.docPropio ? "" : " checked"}> Mandar también el texto del documento leído${estado.docPropio ? " <small>(no hace falta: es un recetario y sus datos ya están en el pedido)</small>" : ""}</label>
-      <label class="caja-doc"${estado.docPropio ? " hidden" : ""}>Texto del documento (podés borrar lo que quieras)<textarea rows="5">${esc(doc)}</textarea></label>` : ""}
-    <div class="fila"><button class="boton chico enviar-ia">Enviar a la IA</button><button class="boton chico secundario cancelar-ia">Cancelar</button></div>`);
-  $(".usar-doc", b)?.addEventListener("change", (e) => ($(".caja-doc", b).hidden = !e.target.checked));
-  $(".cancelar-ia", b).onclick = () => { b.innerHTML = "Cancelado: no se mandó nada."; };
-  $(".enviar-ia", b).onclick = async () => {
-    const boton = $(".enviar-ia", b);
-    const final = Asistente.armarMensaje(d, pedido, "");
-    const usar = $(".usar-doc", b)?.checked, texto = $(".caja-doc textarea", b)?.value.trim();
-    if (usar && texto) final.documento_viejo = Asistente.tapar(Asistente.sinMembrete(texto, membrete()), d.paciente, { renglones: true });
-    boton.disabled = true; boton.classList.add("cargando");
-    try {
-      const conf = await confIA();
-      const propuesta = await Asistente.proponer(conf, final, d, membrete());
-      // Para reportar un problema: lo enviado y lo respondido, ya sin datos del paciente
-      estado.reporteIA = { version: VERSION_APP, modelo: conf.modelo, enviado: final, respuesta: propuesta.crudo };
-      b.innerHTML = "✓ Enviado (sin datos del paciente).";
-      mostrarPropuesta(final.pedido, propuesta);
-    } catch (e) {
-      boton.disabled = false; boton.classList.remove("cargando");
-      burbuja("app", `<span class="aviso-ia">⚠️ ${esc(e.message)}</span>`);
-    }
-  };
+// Se manda directo (el médico solo pide y lee): la identidad del paciente y el membrete se quitan solos, y el control de
+// fugas frena el envío si se colara un dato del paciente. De un recetario ya hecho no se manda su texto (ya está en el pedido).
+async function mostrarEnvio(pedido, hayDocumento) {
+  const d = recolectar();
+  const m = Asistente.armarMensaje(d, pedido, hayDocumento && !estado.docPropio ? estado.textoLeido : "", membrete());
+  const b = burbuja("app", '<span class="cargando">Pensando…</span>');
+  try {
+    const conf = await confIA();
+    const propuesta = await Asistente.proponer(conf, m, d, membrete());
+    // Para reportar un problema: lo enviado y lo respondido, ya sin datos del paciente
+    estado.reporteIA = { version: VERSION_APP, modelo: conf.modelo, enviado: m, respuesta: propuesta.crudo };
+    b.remove();
+    mostrarPropuesta(m.pedido, propuesta);
+  } catch (e) {
+    b.innerHTML = `<span class="aviso-ia">⚠️ ${esc(e.message)}</span>`;
+  }
 }
 
 // Cambios propuestos: cada uno con su casilla; se aplica solo lo marcado
@@ -710,11 +696,11 @@ function mostrarPropuesta(antes, propuesta) {
   };
 }
 // «¿No hizo lo que pediste?»: copia lo enviado y lo respondido (sin datos del paciente) para mandárselo a quien mantiene la app
-const BOTON_REPORTE = `<p class="ayuda" style="margin:8px 0 0">¿No hizo lo que pediste? <a href="#" class="reportar-ia">Copiar para reportar</a> (sin datos del paciente)</p>`;
+const BOTON_REPORTE = `<p class="ayuda" style="margin:8px 0 0"><a href="#" class="reportar-ia">¿No hizo lo que pediste? Avisame</a></p>`;
 function conectarReporte(b) {
   $(".reportar-ia", b)?.addEventListener("click", async (e) => {
     e.preventDefault();
-    toast(await copiar(JSON.stringify(estado.reporteIA, null, 1)) ? "Copiado: pegalo en el mensaje para quien te ayuda con la app." : "No se pudo copiar.", 5000);
+    toast(await copiar(JSON.stringify(estado.reporteIA, null, 1)) ? "Copiado: pegalo en el mensaje para quien te ayuda con la app (no tiene datos del paciente)." : "No se pudo copiar.", 5000);
   });
 }
 const botonesGenerar = () => `<div class="fila">${Object.entries(NOMBRES_DOC).map(([t, n]) => `<button class="boton chico" data-doc="${t}">${n}</button>`).join("")}</div>
@@ -1070,7 +1056,7 @@ function configurarSeguridad() {
 }
 
 // ---------------- Actualizaciones de la app ----------------
-const VERSION_APP = "10"; // igual que VERSION en sw.js
+const VERSION_APP = "11"; // igual que VERSION en sw.js
 function registrarActualizaciones() {
   if (!("serviceWorker" in navigator)) return;
   const habia = !!navigator.serviceWorker.controller;
