@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f3a5f">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https://www.googleapis.com; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https://www.googleapis.com https://api.groq.com; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>Pedidos</title>
 <link rel="manifest" href="manifest.webmanifest">
@@ -130,6 +130,28 @@
       <h2>6. Medicamentos</h2>
       <div id="lista-medicamentos"></div>
       <button class="boton chico secundario" id="btn-agregar-medicamento">+ Agregar medicamento</button>
+    </div>
+
+    <div class="card" id="card-ia">
+      <h2>✨ Pedile cambios a la IA <small class="opcional">(opcional)</small></h2>
+      <p class="ayuda">Sobre lo cargado en pantalla, o sobre una receta o pedido viejo leído en el paso 1. Ej.: «cambiá el ibuprofeno por paracetamol 1 g cada 8 h», «pasalo a bilateral», «copiá los medicamentos de la receta vieja». <b>A la IA no le llega el nombre, el DNI, el afiliado ni el teléfono del paciente</b>, y antes de mandar ves exactamente qué sale.</p>
+      <div id="ia-sin-clave" class="alerta" hidden>Para usarlo, cargá tu clave gratuita en <a href="#" data-ir="config">Configuración › Asistente de IA</a>.</div>
+      <label>¿Qué querés cambiar?<textarea id="ia-pedido" rows="3" placeholder="Escribí o dictá con el micrófono del teclado"></textarea></label>
+      <label class="check"><input type="checkbox" id="ia-usar-doc" disabled> Usar el texto del documento leído en el paso 1</label>
+      <button class="boton" id="ia-revisar">Revisar qué se envía</button>
+      <div id="ia-envio" hidden>
+        <p class="ayuda"><b>Esto es todo lo que sale de este dispositivo.</b> Los datos del paciente aparecen como [PACIENTE]. Podés borrar o corregir el texto del documento antes de mandarlo.</p>
+        <pre id="ia-envio-pedido"></pre>
+        <label id="ia-envio-doc-caja">Texto del documento (editable)<textarea id="ia-envio-doc" rows="6"></textarea></label>
+        <div class="fila"><button class="boton" id="ia-enviar">Enviar a la IA</button><button class="boton secundario" id="ia-cancelar">Cancelar</button></div>
+      </div>
+      <div id="ia-propuesta" hidden>
+        <p class="ayuda"><b>Cambios propuestos:</b> marcá los que querés aplicar.</p>
+        <div id="ia-nota"></div>
+        <div id="ia-cambios"></div>
+        <div class="fila"><button class="boton" id="ia-aplicar">Aplicar los marcados</button><button class="boton secundario" id="ia-descartar">Descartar</button></div>
+      </div>
+      <div class="fila" id="ia-deshacer-fila" hidden><button class="boton chico secundario" id="ia-deshacer">↶ Deshacer los cambios de la IA</button></div>
     </div>
 
     <div class="card">
@@ -262,6 +284,29 @@
       <button class="boton" id="btn-guardar-inst">Guardar</button>
     </div>
     <div class="card">
+      <h2>Asistente de IA</h2>
+      <p class="ayuda">Usa modelos de código abierto (Llama, gpt-oss) en <b>Groq</b>, gratis. Groq no entrena con lo que recibe. A la IA nunca le llega la identidad del paciente.</p>
+      <details class="avanzado"><summary>Cómo sacar tu clave gratuita (una sola vez)</summary>
+        <ol class="ayuda">
+          <li>Entrá a <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a> con tu cuenta de Google.</li>
+          <li>Tocá «Create API Key», ponele de nombre «Pedidos» y copiá la clave (empieza con <code>gsk_</code>).</li>
+          <li>Recomendado: en <a href="https://console.groq.com/settings/data-controls" target="_blank" rel="noopener">Settings › Data Controls</a> activá <b>Zero Data Retention</b> (Groq no guarda nada de lo que mandás).</li>
+          <li>Pegala acá abajo y tocá «Guardar y probar».</li>
+        </ol>
+      </details>
+      <p class="ayuda">La clave queda <b>solo en este dispositivo</b>, cifrada con tu PIN (no va a Drive): cargala en cada celular o computadora donde uses el asistente.</p>
+      <div class="grid">
+        <label class="ancho">Clave de Groq<input id="ia-clave" type="password" autocomplete="off" placeholder="gsk_…"></label>
+        <label class="ancho">Modelo<input id="ia-modelo" list="ia-modelos" autocomplete="off"></label>
+      </div>
+      <datalist id="ia-modelos"></datalist>
+      <div class="fila">
+        <button class="boton chico" id="ia-guardar">Guardar y probar</button>
+        <button class="boton chico peligro" id="ia-borrar">Borrar la clave</button>
+      </div>
+      <p id="ia-estado" class="ayuda"></p>
+    </div>
+    <div class="card">
       <h2>Mi cuenta</h2>
       <p id="cuenta-estado" class="ayuda"></p>
       <div class="fila">
@@ -306,6 +351,7 @@
 <script src="lector.js"></script>
 <script src="catalogos.js"></script>
 <script src="recetario.js"></script>
+<script src="asistente.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

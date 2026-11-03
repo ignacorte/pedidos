@@ -50,7 +50,7 @@ function ir(vista) {
   if (vista === "pacientes") verPacientes();
   if (vista === "kits") verKits();
   if (vista === "config") verConfig();
-  if (vista === "nuevo") $("#falta-perfil").hidden = !!perfil().medico.apellido;
+  if (vista === "nuevo") { $("#falta-perfil").hidden = !!perfil().medico.apellido; avisoIA().catch(() => {}); }
   window.scrollTo(0, 0);
 }
 
@@ -125,6 +125,7 @@ async function leerDocumentos() {
   const avance = (t) => ($("#leyendo-texto").textContent = t);
   try {
     const texto = await Lector.textoDe(estado.archivos, avance, { paginas: 6 });
+    estado.textoLeido = texto; $("#ia-usar-doc").disabled = !texto.trim();
     const d = Catalogos.leer(texto, { kits: vivos("kits"), medico: perfil().medico });
     if (d.vacio) {
       $("#dudas").innerHTML = '<div class="alerta">No se reconocieron datos en las imágenes. Probá con una foto más nítida, de frente y con buena luz, o completá a mano.</div>';
@@ -465,6 +466,9 @@ function limpiarFormulario() {
   $("#sel-kit").value = $("#sel-combo").value = "";
   $("#aviso-kit").innerHTML = $("#dudas").innerHTML = $("#estado-extraccion").innerHTML = "";
   estado.archivos = []; estado.secciones = null; renderMiniaturas();
+  estado.textoLeido = ""; estado.ia = null; estado.antesIA = null;
+  $("#ia-pedido").value = ""; $("#ia-usar-doc").checked = false; $("#ia-usar-doc").disabled = true;
+  $("#ia-envio").hidden = $("#ia-propuesta").hidden = $("#ia-deshacer-fila").hidden = true;
   if (estado.ultimo) { URL.revokeObjectURL(estado.ultimo.url); URL.revokeObjectURL(estado.ultimo.urlPng); }
   estado.ultimo = null; estado.pedidoDe = {};
   $$("[data-generar]").forEach((b) => b.classList.remove("recomendado"));
@@ -502,6 +506,127 @@ function actualizarMembrete() {
   sel.disabled = fijo;
   $("#aviso-membrete").innerHTML = fijo ? `PAMI: siempre el recetario de <strong>${esc(inst.nombre)}</strong>`
     : sel.value === "institucional" ? `Se usará el recetario de <strong>${esc(inst.nombre)}</strong>` : "Se usará <strong>tu recetario personal</strong>";
+}
+
+// ---------------- Asistente de IA (asistente.js) ----------------
+// Configuración: la clave queda solo en este dispositivo, cifrada con el PIN (Almacen.secreto); el modelo sí se sincroniza
+async function confIA() {
+  return { proveedor: "groq", clave: await Almacen.secreto("groq"), modelo: ajuste("ia_modelo", "") || Asistente.PROVEEDORES.groq.modelo };
+}
+async function verIA() {
+  const c = await confIA();
+  $("#ia-clave").value = c.clave || "";
+  $("#ia-modelo").value = c.modelo;
+  $("#ia-estado").textContent = c.clave ? "Clave cargada en este dispositivo." : "Sin clave en este dispositivo.";
+}
+async function guardarIA() {
+  const clave = $("#ia-clave").value.trim(), modelo = $("#ia-modelo").value.trim() || Asistente.PROVEEDORES.groq.modelo;
+  if (!clave) return toast("Pegá la clave de Groq (empieza con gsk_).");
+  $("#ia-estado").textContent = "Probando la clave…";
+  try {
+    const ids = await Asistente.modelos({ proveedor: "groq", clave });
+    $("#ia-modelos").innerHTML = ids.map((id) => `<option value="${esc(id)}">`).join("");
+    if (ids.length && !ids.includes(modelo)) throw new Error(`La clave anda, pero el modelo «${modelo}» no está disponible. Elegí uno de la lista (por ejemplo ${ids.slice(0, 3).join(", ")}).`);
+    await Almacen.guardarSecreto("groq", clave);
+    await Almacen.ajuste("ia_modelo", modelo);
+    $("#ia-estado").textContent = "✓ Clave guardada en este dispositivo y probada.";
+    toast("Asistente de IA listo");
+  } catch (e) { $("#ia-estado").textContent = "⚠️ " + e.message; }
+}
+async function borrarIA() {
+  if (!confirm("¿Borrar la clave de Groq de este dispositivo?")) return;
+  await Almacen.guardarSecreto("groq", null);
+  verIA(); toast("Clave borrada");
+}
+async function avisoIA() { $("#ia-sin-clave").hidden = !!(await Almacen.secreto("groq")); }
+
+// Paso 1: mostrar exactamente lo que se va a mandar
+async function iaRevisar() {
+  const pedido = $("#ia-pedido").value.trim();
+  if (!pedido) return toast("Escribí qué querés cambiar.");
+  if (!(await Almacen.secreto("groq"))) { $("#ia-sin-clave").hidden = false; return toast("Falta tu clave de Groq (Configuración › Asistente de IA)."); }
+  const d = recolectar(), usarDoc = $("#ia-usar-doc").checked && estado.textoLeido;
+  const m = Asistente.armarMensaje(d, pedido, usarDoc ? estado.textoLeido : "");
+  $("#ia-envio-doc").value = m.documento_viejo || "";
+  $("#ia-envio-doc-caja").hidden = !usarDoc;
+  delete m.documento_viejo;
+  $("#ia-envio-pedido").textContent = JSON.stringify(m, null, 1);
+  estado.ia = { d, pedido };
+  $("#ia-envio").hidden = false; $("#ia-propuesta").hidden = true;
+  $("#ia-envio").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+// Paso 2: mandar (lo mismo que se mostró, con el texto del documento tal como lo dejó el médico)
+async function iaEnviar() {
+  const b = $("#ia-enviar"), { d, pedido } = estado.ia || {};
+  if (!d) return;
+  const m = Asistente.armarMensaje(d, pedido, "");
+  if (!$("#ia-envio-doc-caja").hidden && $("#ia-envio-doc").value.trim()) m.documento_viejo = Asistente.tapar($("#ia-envio-doc").value, d.paciente, { renglones: true });
+  b.disabled = true; b.classList.add("cargando");
+  try {
+    const propuesta = await Asistente.proponer(await confIA(), m, d);
+    estado.ia.propuesta = propuesta; estado.ia.antes = m.pedido;
+    const lista = Asistente.cambios(m.pedido, propuesta);
+    estado.ia.cambios = lista;
+    $("#ia-envio").hidden = true;
+    $("#ia-nota").innerHTML = propuesta.nota ? `<div class="alerta">${esc(propuesta.nota)}</div>` : "";
+    $("#ia-cambios").innerHTML = lista.length ? lista.map((c, i) => `<label class="check cambio-ia"><input type="checkbox" data-cambio="${i}" checked><span><b>${esc(c.titulo)}</b>${
+      c.ruta.includes(".") || c.ruta === "observaciones" || c.ruta === "obra_social"
+        ? `<br><del>${esc(c.antes || "(vacío)")}</del><br><ins>${esc(c.despues || "(vacío)")}</ins>`
+        : c.igual ? "<br>cambia el orden o el detalle de las filas"
+        : `${c.quita.map((x) => `<br><del>− ${esc(x)}</del>`).join("")}${c.agrega.map((x) => `<br><ins>+ ${esc(x)}</ins>`).join("")}`}${
+      /\[PACIENTE\]/.test(JSON.stringify(c)) ? '<br><small class="aviso-ia">Tiene [PACIENTE]: reemplazalo a mano después de aplicar.</small>' : ""}</span></label>`).join("")
+      : "<p class='ayuda'>La IA no propuso cambios. Probá explicarlo de otra forma.</p>";
+    $("#ia-aplicar").hidden = !lista.length;
+    $("#ia-propuesta").hidden = false;
+  } catch (e) {
+    toast(e.message, 7000);
+  } finally { b.disabled = false; b.classList.remove("cargando"); }
+}
+// Paso 3: aplicar solo lo marcado (queda resaltado para revisar; se puede deshacer)
+function iaAplicar() {
+  const { propuesta, cambios } = estado.ia || {};
+  const elegidos = $$("[data-cambio]:checked").map((el) => cambios[+el.dataset.cambio]);
+  if (!elegidos.length) return toast("No marcaste ningún cambio.");
+  estado.antesIA = { datos: recolectar(), rutas: elegidos.map((c) => c.ruta) };
+  for (const c of elegidos) ponerCampo(c.ruta, propuesta, true);
+  if (elegidos.some((c) => c.ruta === "clinica.diagnostico") && !elegidos.some((c) => c.ruta === "clinica.cie10")) {
+    const el = campo("clinica.cie10"), nuevo = Catalogos.cie10De(campo("clinica.diagnostico").value)?.codigo || "";
+    if (nuevo !== el.value) { el.value = nuevo; el.classList.add("dudoso"); estado.antesIA.rutas.push("clinica.cie10"); }
+  }
+  actualizarMembrete();
+  $("#ia-propuesta").hidden = true; $("#ia-deshacer-fila").hidden = false; $("#ia-pedido").value = "";
+  toast("Cambios aplicados: quedaron resaltados, revisalos antes de generar.", 5000);
+}
+// Escribe en el formulario un campo o una lista, desde lo propuesto por la IA o desde una copia de antes
+function ponerCampo(ruta, origen, deIA) {
+  const marcar = (el) => deIA && el.classList.add("dudoso");
+  if (ruta === "estudios") {
+    $("#tabla-estudios tbody").innerHTML = "";
+    origen.estudios.forEach((e) => {
+      const pr = deIA && !e.codigo ? Catalogos.mejorPractica(e.descripcion) : null;
+      $$("input", filaEstudio(pr ? { codigo: pr.codigo, descripcion: e.descripcion } : e)).forEach(marcar);
+    });
+  } else if (ruta === "materiales") {
+    $("#tabla-materiales tbody").innerHTML = "";
+    origen.materiales.forEach((m) => $$("input", filaMaterial($("#tabla-materiales tbody"), m)).forEach(marcar));
+  } else if (ruta === "medicamentos") {
+    $("#lista-medicamentos").innerHTML = "";
+    origen.medicamentos.forEach((m) => { agregarMedicamento(m); $$("#lista-medicamentos .medicamento:last-child [data-m]").forEach(marcar); });
+  } else {
+    const el = ruta === "obra_social" ? campo("cobertura.obra_social") : campo(ruta);
+    const [g, k] = ruta.split(".");
+    el.value = ruta === "obra_social" ? (origen.obra_social ?? origen.cobertura?.obra_social ?? "") : k ? origen[g][k] : origen[g];
+    marcar(el);
+  }
+}
+function iaDeshacer() {
+  const a = estado.antesIA;
+  if (!a) return;
+  for (const r of a.rutas) ponerCampo(r, a.datos, false);
+  $$(".dudoso").forEach((el) => el.classList.remove("dudoso"));
+  actualizarMembrete();
+  estado.antesIA = null; $("#ia-deshacer-fila").hidden = true;
+  toast("Se volvió a como estaba antes de la IA.");
 }
 
 // ---------------- Pacientes (de los pedidos guardados) ----------------
@@ -601,6 +726,7 @@ function verConfig() {
   $$("[data-medico]").forEach((el) => (el.value = p.medico[el.dataset.medico] || ""));
   $$("[data-inst]").forEach((el) => (el.value = p.institucion[el.dataset.inst] || ""));
   $$("[data-imagen]").forEach(renderImagen);
+  verIA().catch(() => {});
   $("#min-bloqueo").value = String(ajuste("minutos_bloqueo", 15));
   $("#version-app").textContent = "Versión " + VERSION_APP;
   const cuenta = Almacen.cuenta;
@@ -795,7 +921,7 @@ function configurarSeguridad() {
 }
 
 // ---------------- Actualizaciones de la app ----------------
-const VERSION_APP = "3"; // igual que VERSION en sw.js
+const VERSION_APP = "4"; // igual que VERSION en sw.js
 function registrarActualizaciones() {
   if (!("serviceWorker" in navigator)) return;
   const habia = !!navigator.serviceWorker.controller;
@@ -851,6 +977,14 @@ async function arrancar() {
   $("#btn-borrar-combo").addEventListener("click", borrarCombo);
   $("#btn-agregar-medicamento").addEventListener("click", () => agregarMedicamento());
   $("#btn-armar-resumen").addEventListener("click", armarResumen);
+  $("#ia-revisar").addEventListener("click", () => iaRevisar().catch((e) => toast(e.message)));
+  $("#ia-enviar").addEventListener("click", iaEnviar);
+  $("#ia-cancelar").addEventListener("click", () => ($("#ia-envio").hidden = true));
+  $("#ia-aplicar").addEventListener("click", iaAplicar);
+  $("#ia-descartar").addEventListener("click", () => ($("#ia-propuesta").hidden = true));
+  $("#ia-deshacer").addEventListener("click", iaDeshacer);
+  $("#ia-guardar").addEventListener("click", guardarIA);
+  $("#ia-borrar").addEventListener("click", () => borrarIA().catch((e) => toast(e.message)));
   $$("[data-generar]").forEach((b) => b.addEventListener("click", () => generar(b.dataset.generar, b)));
   let tm; campo("cobertura.obra_social").addEventListener("input", () => { clearTimeout(tm); tm = setTimeout(actualizarMembrete, 300); });
   $("#sel-membrete").addEventListener("change", () => { estado.membreteElegido = $("#sel-membrete").value; actualizarMembrete(); });

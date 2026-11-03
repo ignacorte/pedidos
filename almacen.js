@@ -71,15 +71,31 @@ const Almacen = (() => {
 
   async function crearPin(pin) {
     // Los PDF pendientes de subir están cifrados con la llave anterior: se leen antes de cambiarla y se vuelven a cifrar
-    if (llave) await leerAdjuntos();
+    if (llave) { await leerAdjuntos(); await leerSecretos(); }
     const sal = crypto.getRandomValues(new Uint8Array(16));
     llave = await derivar(pin, sal, ITERACIONES);
     meta = { sal, iteraciones: ITERACIONES, verificador: await cifrar(PRUEBA) };
     await idbEscribir({ pin: meta });
     await escribirLocal();
     if (adjuntos) await guardarAdjuntos();
+    if (secretos) await idbEscribir({ secretos: await cifrar(secretos) });
     await guardarSesion();
     if (tokenMem) await guardarToken();
+  }
+
+  // Secretos del profesional (clave del asistente de IA): solo en este dispositivo, cifrados con el PIN; nunca van a Drive
+  let secretos = null;
+  async function leerSecretos() {
+    if (!secretos) { const s = await idbLeer("secretos"); secretos = s ? await descifrar(s).catch(() => ({})) : {}; }
+    return secretos;
+  }
+  const secreto = async (nombre) => (llave ? (await leerSecretos())[nombre] ?? null : null);
+  async function guardarSecreto(nombre, valor) {
+    if (!llave) throw new Error("Desbloqueá la app primero.");
+    const s = { ...(await leerSecretos()) };
+    if (valor == null) delete s[nombre]; else s[nombre] = valor;
+    secretos = s;
+    await idbEscribir({ secretos: await cifrar(s) });
   }
 
   // Intentos fallidos: espera creciente (30 s, 1 min, 2 min…) después del quinto, también entre reinicios de la app
@@ -112,6 +128,7 @@ const Almacen = (() => {
   async function bloquear() {
     llave = null;
     adjuntos = null;
+    secretos = null;
     doc = vacio();
     tokenMem = null;
     clearTimeout(temporizador);
@@ -124,7 +141,7 @@ const Almacen = (() => {
     const viejo = await idbLeer(CLAVE), pendientes = await idbLeer("adjuntos");
     if (viejo || pendientes) await idbEscribir({ ["olvidado_" + Date.now()]: { datos: viejo, adjuntos: pendientes, pin: meta } });
     meta = null;
-    await idbEscribir({ [CLAVE]: undefined, pin: undefined, token: undefined, token_vence: undefined, fallos: undefined, sesion: undefined, pendiente: undefined, adjuntos: undefined });
+    await idbEscribir({ [CLAVE]: undefined, pin: undefined, token: undefined, token_vence: undefined, fallos: undefined, sesion: undefined, pendiente: undefined, adjuntos: undefined, secretos: undefined });
   }
   // Datos de un PIN anterior («Olvidé mi PIN» o «Cerrar cuenta»): con ese PIN se abren y se suman a lo de hoy (no se pisa nada)
   async function olvidados() {
@@ -525,7 +542,7 @@ const Almacen = (() => {
 
   return {
     iniciar, guardar, guardarVarios, sembrar, confirmar, olvidados, recuperarOlvidado, borrar, ajuste, combinar, respaldos, recuperarRespaldo, encolarAdjunto, enlaceCarpeta, tocar,
-    exportarCopia, importarCopia, marcarCopia, tienePin, bloqueada, crearPin, desbloquear, bloquear, olvidePin, cambiarPin, esperaRestante,
+    exportarCopia, importarCopia, marcarCopia, tienePin, bloqueada, crearPin, secreto, guardarSecreto, desbloquear, bloquear, olvidePin, cambiarPin, esperaRestante,
     sincronizar, conectar, recibirToken, conectado, desconectar,
     get registro() { return registro; }, get errorAdjuntos() { return errorAdjuntos; }, adjuntosPendientes: async () => (await leerAdjuntos()).length,
     get doc() { return doc; }, get cuenta() { return doc.cuenta || cuentaPlano; }, get pendiente() { return pendiente; },

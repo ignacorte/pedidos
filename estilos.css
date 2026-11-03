@@ -102,6 +102,14 @@ hr { border: 0; border-top: 1px solid var(--borde); margin: 14px 0; }
 details.avanzado { border: 1px solid var(--borde); border-radius: 10px; padding: 6px 10px; margin: 8px 0; }
 details.avanzado > summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
 details.avanzado > summary .ayuda { font-weight: 400; display: inline; margin: 0 0 0 6px; }
+/* Asistente de IA */
+.cambio-ia { align-items: flex-start; border-bottom: 1px solid var(--borde); padding: 8px 0; margin: 0; font-size: 14px; }
+.cambio-ia input { margin-top: 2px; }
+.cambio-ia del { color: var(--rojo); }
+.cambio-ia ins { color: var(--verde); text-decoration: none; }
+.aviso-ia { color: var(--ambar); }
+#ia-envio, #ia-propuesta { border: 1px solid var(--borde); border-radius: 8px; padding: 8px 12px; margin: 10px 0; }
+#ia-envio pre { max-height: 260px; overflow: auto; font-size: 12px; }
 /* Computadora: más ancho, menú abajo centrado */
 @media (min-width: 1100px) {
   main { max-width: 1000px; }
