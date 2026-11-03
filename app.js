@@ -144,14 +144,17 @@ async function leerDocumentos() {
 }
 
 function cargarLectura(d) {
-  // Paciente ya conocido (mismo DNI en Pacientes): sus datos guardados valen más que lo leído (orden nombre/apellido, etc.)
+  // Paciente ya conocido (mismo DNI en Pacientes): completa solo lo que la lectura no trajo (teléfono, email, nacimiento…);
+  // lo leído no se reemplaza, y si el nombre no coincide con el guardado se avisa (el guardado pudo haber quedado mal)
   const dni = (d.paciente.dni || "").replace(/\D/g, "");
   const conocido = dni && pacientes().find((x) => x.clave === dni)?.ultimo.datos;
   if (conocido) {
-    const c = datosCompletos(conocido);
-    d.paciente = { ...d.paciente, ...Object.fromEntries(Object.entries(c.paciente).filter(([, v]) => v)) };
-    d.cobertura = { ...d.cobertura, ...Object.fromEntries(Object.entries(c.cobertura).filter(([, v]) => v)) };
-    d.dudas = d.dudas.filter((x) => !x.startsWith("Nombre y apellido tomados")).concat("Paciente que ya estaba en Pacientes: se usaron sus datos guardados.");
+    const c = datosCompletos(conocido), vacios = (g) => Object.fromEntries(Object.entries(c[g]).filter(([k, v]) => v && !d[g][k]));
+    const nombreDe = (p) => Catalogos.normalizar(`${p.apellido} ${p.nombre}`);
+    if (d.paciente.apellido && nombreDe(d.paciente) !== nombreDe(c.paciente))
+      d.dudas.push(`En Pacientes figura con ese DNI como «${c.paciente.apellido}, ${c.paciente.nombre}»: revisá cuál es el nombre correcto.`);
+    d.paciente = { ...d.paciente, ...vacios("paciente") };
+    d.cobertura = { ...d.cobertura, ...vacios("cobertura") };
   }
   // Solo completa campos vacíos: no pisa lo que el médico ya escribió
   for (const grupo of ["paciente", "cobertura", "clinica"]) {
@@ -522,7 +525,14 @@ function actualizarMembrete() {
 // ---------------- Asistente de IA (asistente.js) ----------------
 // Configuración: la clave queda solo en este dispositivo, cifrada con el PIN (Almacen.secreto); el modelo sí se sincroniza
 async function confIA() {
-  return { proveedor: "groq", clave: await Almacen.secreto("groq"), modelo: ajuste("ia_modelo", "") || Asistente.PROVEEDORES.groq.modelo };
+  // (el anterior modelo por defecto, Llama 3.3, seguía mal las indicaciones: quien lo tenía guardado pasa al nuevo)
+  const guardado = ajuste("ia_modelo", "");
+  return { proveedor: "groq", clave: await Almacen.secreto("groq"), modelo: guardado && guardado !== "llama-3.3-70b-versatile" ? guardado : Asistente.PROVEEDORES.groq.modelo };
+}
+// Membrete del propio recetario (médico e institución): no se manda ni se acepta en los campos
+function membrete() {
+  const { medico: m, institucion: i } = perfil();
+  return [m.apellido, ...String(m.nombre || "").split(/\s+/), m.direccion, m.telefono, m.email, m.web, m.subtitulo, m.especialidad, i.nombre, i.pie].map((x) => (x || "").trim()).filter((x) => x.length > 2);
 }
 async function verIA() {
   const c = await confIA();
@@ -606,7 +616,7 @@ async function enviarChat() {
           $(".fila", b).remove();
           if (r === "nuevo") limpiarFormulario({ chat: false });
         }
-        estado.textoLeido = t; conDocumento = true;
+        estado.textoLeido = t; estado.docPropio = !!d.propio; conDocumento = true;
         cargarLectura(d);
         const p = d.paciente, c = d.clinica;
         b.insertAdjacentHTML("beforeend", (otro ? "<br><br>" : "") + `Leí el documento (no salió de este dispositivo) y completé lo que faltaba en el pedido:<br>${[
@@ -629,13 +639,13 @@ async function enviarChat() {
 
 // Antes de mandar: el médico ve exactamente lo que sale (y puede editar o quitar el texto del documento)
 function mostrarEnvio(pedido, hayDocumento) {
-  const d = recolectar(), m = Asistente.armarMensaje(d, pedido, hayDocumento ? estado.textoLeido : "");
+  const d = recolectar(), m = Asistente.armarMensaje(d, pedido, hayDocumento ? estado.textoLeido : "", membrete());
   const doc = m.documento_viejo || "";
   delete m.documento_viejo;
   const b = burbuja("app", `<b>🔒 Esto es todo lo que sale de este dispositivo.</b> Los datos del paciente van como [PACIENTE].
     <details><summary>Ver el pedido que se manda</summary><pre>${esc(JSON.stringify(m, null, 1))}</pre></details>
-    ${doc ? `<label class="check" style="margin-top:6px"><input type="checkbox" class="usar-doc" checked> Mandar también el texto del documento leído</label>
-      <label class="caja-doc">Texto del documento (podés borrar lo que quieras)<textarea rows="5">${esc(doc)}</textarea></label>` : ""}
+    ${doc ? `<label class="check" style="margin-top:6px"><input type="checkbox" class="usar-doc"${estado.docPropio ? "" : " checked"}> Mandar también el texto del documento leído${estado.docPropio ? " <small>(no hace falta: es un recetario y sus datos ya están en el pedido)</small>" : ""}</label>
+      <label class="caja-doc"${estado.docPropio ? " hidden" : ""}>Texto del documento (podés borrar lo que quieras)<textarea rows="5">${esc(doc)}</textarea></label>` : ""}
     <div class="fila"><button class="boton chico enviar-ia">Enviar a la IA</button><button class="boton chico secundario cancelar-ia">Cancelar</button></div>`);
   $(".usar-doc", b)?.addEventListener("change", (e) => ($(".caja-doc", b).hidden = !e.target.checked));
   $(".cancelar-ia", b).onclick = () => { b.innerHTML = "Cancelado: no se mandó nada."; };
@@ -643,10 +653,13 @@ function mostrarEnvio(pedido, hayDocumento) {
     const boton = $(".enviar-ia", b);
     const final = Asistente.armarMensaje(d, pedido, "");
     const usar = $(".usar-doc", b)?.checked, texto = $(".caja-doc textarea", b)?.value.trim();
-    if (usar && texto) final.documento_viejo = Asistente.tapar(texto, d.paciente, { renglones: true });
+    if (usar && texto) final.documento_viejo = Asistente.tapar(Asistente.sinMembrete(texto, membrete()), d.paciente, { renglones: true });
     boton.disabled = true; boton.classList.add("cargando");
     try {
-      const propuesta = await Asistente.proponer(await confIA(), final, d);
+      const conf = await confIA();
+      const propuesta = await Asistente.proponer(conf, final, d, membrete());
+      // Para reportar un problema: lo enviado y lo respondido, ya sin datos del paciente
+      estado.reporteIA = { version: VERSION_APP, modelo: conf.modelo, enviado: final, respuesta: propuesta.crudo };
       b.innerHTML = "✓ Enviado (sin datos del paciente).";
       mostrarPropuesta(final.pedido, propuesta);
     } catch (e) {
@@ -660,7 +673,8 @@ function mostrarEnvio(pedido, hayDocumento) {
 function mostrarPropuesta(antes, propuesta) {
   const lista = Asistente.cambios(antes, propuesta);
   if (!lista.length) {
-    const r = burbuja("app", `No hay nada que cambiar en el pedido.${propuesta.nota ? " " + esc(propuesta.nota) : ""}<br>Al generar, el documento sale con la fecha de hoy:${botonesGenerar()}`);
+    const r = burbuja("app", `No hay nada que cambiar en el pedido.${propuesta.nota ? " " + esc(propuesta.nota) : ""}<br>Al generar, el documento sale con la fecha de hoy:${botonesGenerar()}${BOTON_REPORTE}`);
+    conectarReporte(r);
     return conectarGenerar(r);
   }
   const b = burbuja("app", `<b>Cambios propuestos</b> (marcá los que querés):${propuesta.nota ? `<div class="alerta" style="margin:6px 0">${esc(propuesta.nota)}</div>` : ""}
@@ -670,8 +684,9 @@ function mostrarPropuesta(antes, propuesta) {
         : c.igual ? "<br>cambia el orden o el detalle de las filas"
         : `${c.quita.map((x) => `<br><del>− ${esc(x)}</del>`).join("")}${c.agrega.map((x) => `<br><ins>+ ${esc(x)}</ins>`).join("")}`}${
       /\[PACIENTE\]/.test(JSON.stringify(c)) ? '<br><small class="aviso-ia">Tiene [PACIENTE]: reemplazalo a mano después de aplicar.</small>' : ""}</span></label>`).join("")}
-    <div class="fila"><button class="boton chico aplicar-ia">Aplicar</button><button class="boton chico secundario descartar-ia">Descartar</button></div>`);
-  $(".descartar-ia", b).onclick = () => { $$(".fila, input", b).forEach((x) => (x.disabled = true)); $(".fila", b).remove(); burbuja("app", "Descartado: el pedido quedó como estaba."); };
+    <div class="fila"><button class="boton chico aplicar-ia">Aplicar</button><button class="boton chico secundario descartar-ia">Descartar</button></div>${BOTON_REPORTE}`);
+  conectarReporte(b);
+  $(".descartar-ia", b).onclick = () => { $$("input", b).forEach((x) => (x.disabled = true)); $(".fila", b).remove(); burbuja("app", "Descartado: el pedido quedó como estaba."); };
   $(".aplicar-ia", b).onclick = () => {
     const elegidos = $$("[data-cambio]", b).filter((el) => el.checked).map((el) => lista[+el.dataset.cambio]);
     if (!elegidos.length) return toast("No marcaste ningún cambio.");
@@ -682,6 +697,14 @@ function mostrarPropuesta(antes, propuesta) {
     conectarGenerar(r);
     $(".deshacer-ia", r).onclick = () => { iaDeshacer(); $(".deshacer-ia", r).remove(); burbuja("app", "Listo: volví el pedido a como estaba antes de la IA."); };
   };
+}
+// «¿No hizo lo que pediste?»: copia lo enviado y lo respondido (sin datos del paciente) para mandárselo a quien mantiene la app
+const BOTON_REPORTE = `<p class="ayuda" style="margin:8px 0 0">¿No hizo lo que pediste? <a href="#" class="reportar-ia">Copiar para reportar</a> (sin datos del paciente)</p>`;
+function conectarReporte(b) {
+  $(".reportar-ia", b)?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    toast(await copiar(JSON.stringify(estado.reporteIA, null, 1)) ? "Copiado: pegalo en el mensaje para quien te ayuda con la app." : "No se pudo copiar.", 5000);
+  });
 }
 const botonesGenerar = () => `<div class="fila">${Object.entries(NOMBRES_DOC).map(([t, n]) => `<button class="boton chico" data-doc="${t}">${n}</button>`).join("")}</div>
   <div class="fila"><button class="boton chico secundario ver-pedido">Ver el pedido completo</button></div>`;
@@ -1025,7 +1048,7 @@ function configurarSeguridad() {
 }
 
 // ---------------- Actualizaciones de la app ----------------
-const VERSION_APP = "7"; // igual que VERSION en sw.js
+const VERSION_APP = "8"; // igual que VERSION en sw.js
 function registrarActualizaciones() {
   if (!("serviceWorker" in navigator)) return;
   const habia = !!navigator.serviceWorker.controller;

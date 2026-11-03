@@ -195,6 +195,7 @@ const Catalogos = (() => {
       cobertura: { obra_social: obraSocialCanonica(p.obra_social_texto || ""), nro_afiliado: sinCasilla(p.afiliado || p.afiliadoPorForma || "") },
       clinica: { diagnostico: sinGritar(diagnostico), cie10: cie, procedimiento: sinGritar(procedimiento), caracter },
       kit_sugerido: kit?.id || "",
+      propio, // recetario ya hecho (de esta app o con su formato)
       recomendacion: { combo: conPrequirurgico ? "prequirurgico-pami" : "", estudios, documentos },
       vacio: !Object.values(leido).some(Boolean) && !estudios.length,
       dudas,

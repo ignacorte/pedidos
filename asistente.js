@@ -9,11 +9,11 @@
 // (Se descartó OpenRouter: varios de sus modelos gratuitos corren en servicios que pueden entrenar con los datos.)
 const Asistente = (() => {
   const PROVEEDORES = {
-    groq: { nombre: "Groq", url: "https://api.groq.com/openai/v1", modelo: "llama-3.3-70b-versatile", claves: "https://console.groq.com/keys", json: true },
+    groq: { nombre: "Groq", url: "https://api.groq.com/openai/v1", modelo: "openai/gpt-oss-120b", claves: "https://console.groq.com/keys", json: true },
   };
 
   // Modelos abiertos de Groq, del mejor al más simple, por si el elegido deja de estar disponible
-  const PREFERIDOS = ["llama-3.3-70b-versatile", "openai/gpt-oss-120b", "moonshotai/kimi-k2-instruct", "qwen/qwen3-32b", "openai/gpt-oss-20b", "llama-3.1-8b-instant"];
+  const PREFERIDOS = ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "moonshotai/kimi-k2-instruct", "qwen/qwen3-32b", "openai/gpt-oss-20b", "llama-3.1-8b-instant"];
 
   const INSTRUCCIONES = `Sos el asistente de un cirujano general argentino dentro de su app de pedidos médicos (estudios, materiales, autorización de cirugía, resumen de historia clínica y receta).
 Recibís el pedido actual en JSON, a veces el texto leído de un documento viejo (receta o pedido anterior, con posibles errores de lectura) y la indicación del médico.
@@ -24,6 +24,7 @@ Dónde va cada cosa:
 - Resumen de historia clínica: autorizacion.fundamento y autorizacion.resumen_estudios.
 - La FECHA DEL DOCUMENTO no es un campo: al generar el documento sale sola con la fecha de hoy ("hoy"). Si piden «fecha de hoy» o «actualizar la fecha», no cambies nada por eso y explicalo en "_nota". autorizacion.fecha_probable es solo la fecha probable de la cirugía.
 Reglas:
+- El documento viejo es un recetario: membrete, nombre de la institución, lema, datos y sello del médico (nombre, matrícula M.P./M.E., especialidad), firma, «Rp/» y pie NO son datos del pedido. Nunca los copies a ningún campo.
 - Cambiá únicamente lo que se pide. No inventes datos clínicos que nadie mencionó.
 - Si te piden tomar algo del documento viejo (por ejemplo «copiá los medicamentos de la receta»), pasalo a los campos que correspondan.
 - Medicamentos: nombre_generico (genérico, sin marca, salvo que el médico la pida), presentacion (ej.: «comprimidos 500 mg»), cantidad (número de envases), posologia (ej.: «1 comprimido cada 8 h por 5 días»).
@@ -67,15 +68,26 @@ Agregá además la clave "_nota" con una frase corta para el médico si algo no 
       .replace(/\+?\d[\d \t().-]{5,}\d/g, (m) => (m.replace(/\D/g, "").length >= 7 ? "[PACIENTE]" : m)); // DNI, afiliado, teléfono (no fechas: llevan «/»)
   }
 
-  // Lo que se manda, tal cual (se puede ver antes de mandar)
-  function armarMensaje(d, instruccion, textoViejo) {
+  // Membrete del recetario (datos del médico y de la institución, matrícula, lema, «Rp/»): no es parte del pedido
+  const MATRICULA = /\bM\.?\s?[PEN]\.?\s*:?\s*\d/i, ADORNOS = /^\s*rp\s*\/?\s*$|calidad y calidez|acreditad/i;
+  const deMembrete = (linea, quitar = []) => MATRICULA.test(linea) || ADORNOS.test(linea) ||
+    quitar.some((q) => {
+      if (!q) return false;
+      if (!q.includes(" ")) return patron(q).test(linea);
+      const l = Catalogos.normalizar(linea), n = Catalogos.normalizar(q);
+      return l.includes(n) || (l.length >= 6 && n.includes(l)); // también el nombre partido en dos renglones («Instituto Médico» / «Río Cuarto»)
+    });
+  const sinMembrete = (texto, quitar) => String(texto || "").split(/\r?\n/).filter((l) => !deMembrete(l, quitar)).join("\n");
+
+  // Lo que se manda, tal cual (se puede ver antes de mandar). `quitar`: textos del membrete (médico, institución)
+  function armarMensaje(d, instruccion, textoViejo, quitar = []) {
     const pedido = sinIdentidad(d);
     for (const g of ["clinica", "autorizacion"]) for (const k in pedido[g]) pedido[g][k] = tapar(pedido[g][k], d.paciente);
     pedido.observaciones = tapar(pedido.observaciones, d.paciente);
     pedido.obra_social = tapar(pedido.obra_social, d.paciente);
     const h = new Date(), hoy = `${String(h.getDate()).padStart(2, "0")}/${String(h.getMonth() + 1).padStart(2, "0")}/${h.getFullYear()}`;
     const partes = { hoy, pedido, indicacion: tapar(instruccion, d.paciente) };
-    if (textoViejo) partes.documento_viejo = tapar(textoViejo, d.paciente, { renglones: true }).slice(0, 6000);
+    if (textoViejo) partes.documento_viejo = tapar(sinMembrete(textoViejo, quitar), d.paciente, { renglones: true }).slice(0, 6000);
     return partes;
   }
 
@@ -97,11 +109,13 @@ Agregá además la clave "_nota" con una frase corta para el médico si algo no 
       const r = await fetch(p.url + "/chat/completions", {
         method: "POST", signal: ctl.signal,
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + conf.clave },
-        body: JSON.stringify({ model: conf.modelo || p.modelo, temperature: 0.1, ...cuerpo, ...(p.json ? { response_format: { type: "json_object" } } : {}) }),
+        body: JSON.stringify({ model: conf.modelo || p.modelo, temperature: 0.1, ...(p.json ? { response_format: { type: "json_object" } } : {}), ...cuerpo }),
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) {
         const msg = j.error?.message || r.statusText || "";
+        // Modelo sin «modo JSON»: se repite pidiéndolo solo en las instrucciones
+        if (r.status === 400 && !("response_format" in cuerpo) && /response_format|json/i.test(msg)) return llamar(conf, { ...cuerpo, response_format: undefined }, ms);
         if (r.status === 401 || r.status === 403) throw new Error("La clave no es válida (revisala en Configuración › Asistente de IA).");
         if (r.status === 429) throw new Error("Se llegó al límite gratuito del servicio por ahora. Esperá un rato y probá de nuevo.");
         if (r.status === 404 || /model/i.test(msg)) throw new Error(`El modelo «${conf.modelo || p.modelo}» no está disponible: elegí otro en Configuración › Asistente de IA. (${msg})`);
@@ -127,11 +141,22 @@ Agregá además la clave "_nota" con una frase corta para el médico si algo no 
     return [...new Set(hallado)];
   }
 
-  async function proponer(conf, mensaje, d) {
+  async function proponer(conf, mensaje, d, quitar = []) {
     const f = fugas(mensaje, d);
     if (f.length) throw new Error(`No se mandó nada: quedaba un dato del paciente (${f.join(", ")}). Borralo del texto y probá de nuevo.`);
     const texto = await llamar(conf, { messages: [{ role: "system", content: INSTRUCCIONES }, { role: "user", content: JSON.stringify(mensaje) }] });
-    return limpiar(jsonDe(texto), mensaje.pedido);
+    let r = jsonDe(texto);
+    // A veces la IA devuelve todo el mensaje ({hoy, pedido, indicacion}) en vez de solo el pedido
+    if (r && typeof r.pedido === "object" && !r.clinica) r = { ...r.pedido, _nota: r._nota ?? r.pedido._nota };
+    const out = limpiar(r, mensaje.pedido);
+    // Texto del membrete metido en un campo: se descarta ese cambio
+    const descartados = [];
+    for (const [g, ks] of Object.entries(CAMPOS)) for (const k of ks)
+      if (out[g][k] !== mensaje.pedido[g][k] && out[g][k].split(/\n|(?<=\.)\s/).some((l) => deMembrete(l, quitar))) { out[g][k] = mensaje.pedido[g][k]; descartados.push(NOMBRES[k]); }
+    if (out.observaciones !== mensaje.pedido.observaciones && out.observaciones.split(/\n|(?<=\.)\s/).some((l) => deMembrete(l, quitar))) { out.observaciones = mensaje.pedido.observaciones; descartados.push(NOMBRES.observaciones); }
+    if (descartados.length) out.nota = [out.nota, `Se descartó lo que la IA copió del membrete del recetario en: ${descartados.join(", ")}.`].filter(Boolean).join(" ");
+    out.crudo = texto;
+    return out;
   }
 
   // Deja la respuesta con la forma exacta del pedido (lo que falte o venga raro queda como estaba)
@@ -179,5 +204,5 @@ Agregá además la clave "_nota" con una frase corta para el médico si algo no 
     return ids.filter((id) => !/whisper|tts|guard|embed|vision|orpheus|playai|distil/i.test(id)).sort();
   }
 
-  return { PROVEEDORES, PREFERIDOS, sinIdentidad, tapar, armarMensaje, fugas, proponer, limpiar, cambios, modelos, jsonDe };
+  return { PROVEEDORES, PREFERIDOS, sinIdentidad, tapar, sinMembrete, armarMensaje, fugas, proponer, limpiar, cambios, modelos, jsonDe };
 })();
