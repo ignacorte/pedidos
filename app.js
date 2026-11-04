@@ -1056,7 +1056,7 @@ function configurarSeguridad() {
 }
 
 // ---------------- Actualizaciones de la app ----------------
-const VERSION_APP = "11"; // igual que VERSION en sw.js
+const VERSION_APP = "12"; // igual que VERSION en sw.js
 function registrarActualizaciones() {
   if (!("serviceWorker" in navigator)) return;
   const habia = !!navigator.serviceWorker.controller;
@@ -1212,11 +1212,19 @@ async function arrancar() {
     await Almacen.usarLocal();
     Almacen.tienePin() ? pedirPin("desbloquear") : pedirPin("crear");
   });
-  // Al volver a la app con cambios sin subir y el acceso vencido: renovarlo y subir
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState !== "visible" || Almacen.bloqueada() || !Almacen.doc.cuenta) return;
-    if (Almacen.tieneToken()) { if (Almacen.pendiente) Almacen.sincronizar().catch(() => {}); }
-  });
+  // Lo cargado en otros dispositivos (la PC) se trae solo: al volver a la app y cada 5 minutos mientras está abierta (antes
+  // solo se subía lo propio). El acceso a Drive dura 1 hora: al volver se renueva sin pedir nada si no hay nada a medio cargar.
+  let ultimaTraida = Date.now();
+  const traer = ({ renovar = false } = {}) => {
+    if (Almacen.bloqueada() || !Almacen.doc.cuenta || !navigator.onLine) return;
+    if (Almacen.tieneToken()) {
+      if (Date.now() - ultimaTraida < 60e3 && !Almacen.pendiente) return;
+      ultimaTraida = Date.now();
+      Almacen.sincronizar().then(() => { renderSelectorKits(); renderCombos(); actualizarMembrete(); if (estado.vista === "pacientes") verPacientes(); }).catch(() => {});
+    } else if (renovar && !formularioOcupado() && !$("#chat-mensajes").children.length && !$("#chat-texto").value.trim()) renovarAcceso({ preguntar: false });
+  };
+  document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && traer({ renovar: true }));
+  setInterval(() => document.visibilityState === "visible" && traer(), 5 * 60e3);
   window.addEventListener("online", () => Almacen.tieneToken() && Almacen.sincronizar().catch(() => {}));
 
   const cuenta = Almacen.cuenta, local = Almacen.local && !cuenta;
