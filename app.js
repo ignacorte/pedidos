@@ -53,6 +53,8 @@ function ir(vista) {
   if (vista === "nuevo") $("#falta-perfil").hidden = !!perfil().medico.apellido;
   if (vista === "asistente") { avisoIA().catch(() => {}); setTimeout(() => window.scrollTo(0, document.body.scrollHeight), 0); }
   estado.vista = vista;
+  // Al recargar la página se vuelve a la misma pantalla (solo en esta pestaña: al abrir la app de cero, el Asistente)
+  if (dentro) try { sessionStorage.setItem("ped_vista", vista); } catch { /* sin almacenamiento */ }
   window.scrollTo(0, 0);
 }
 
@@ -997,7 +999,8 @@ function entrar() {
   mostrarSync(Almacen.estado);
   const listo = () => { renderSelectorKits(); renderCombos(); actualizarMembrete(); };
   listo();
-  if (!entro) ir(perfil().medico.apellido ? "asistente" : "config");
+  const recordada = (() => { try { return sessionStorage.getItem("ped_vista"); } catch { return null; } })();
+  if (!entro) ir(!perfil().medico.apellido ? "config" : ["asistente", "nuevo", "pacientes", "kits", "config"].includes(recordada) ? recordada : "asistente");
   else ir(["asistente", "nuevo", "pacientes", "kits", "config"].includes(estado.vista) ? estado.vista : "asistente");
   if (!perfil().medico.apellido && !entro) toast("Primero cargá tu recetario: nombre, matrícula y firma.", 5000);
   entro = true;
@@ -1056,7 +1059,7 @@ function configurarSeguridad() {
 }
 
 // ---------------- Actualizaciones de la app ----------------
-const VERSION_APP = "12"; // igual que VERSION en sw.js
+const VERSION_APP = "13"; // igual que VERSION en sw.js
 function registrarActualizaciones() {
   if (!("serviceWorker" in navigator)) return;
   const habia = !!navigator.serviceWorker.controller;
