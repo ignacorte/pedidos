@@ -974,13 +974,22 @@ function bienvenida(mensaje) {
 }
 
 const TEXTOS_PIN = {
+  crearNuevo: ["Creá el PIN de este dispositivo", "Es un PIN nuevo, solo para este dispositivo (puede ser distinto del que usás en otro). Tus datos vienen de tu Google Drive y acá quedan cifrados con este PIN. Mínimo 6 números: anotalo en un lugar seguro.", "Crear PIN"],
   crear: ["Creá tu PIN", "Protege los datos de tus pacientes en este dispositivo: quedan cifrados y solo se abren con el PIN. Mínimo 6 números. No se puede recuperar: anotalo en un lugar seguro.", "Crear PIN"],
   desbloquear: ["Desbloquear", "Ingresá tu PIN.", "Entrar"],
   cambiar: ["Cambiar PIN", "Ingresá el PIN actual y el nuevo (mínimo 6 números).", "Cambiar"],
 };
 function pedirPin(modo) {
   estado.modoPin = modo;
-  const [titulo, ayuda, boton] = TEXTOS_PIN[modo];
+  const [titulo, ayuda, boton] = TEXTOS_PIN[modo === "crear" && Almacen.cuenta ? "crearNuevo" : modo];
+  // Con qué cuenta está (o si está sin cuenta) y, sin cuenta, la forma de entrar con Google para traer los datos del Drive
+  // (en un celular nuevo, si se entró «sin cuenta», solo quedaba el PIN y los datos de Google no aparecían)
+  const cuenta = Almacen.cuenta, recienConectado = !cuenta && Almacen.tieneToken(); // volvió de Google: el correo se sabe al sincronizar
+  $("#pin-cuenta").innerHTML = cuenta ? `Cuenta de Google: <b>${esc(cuenta)}</b>`
+    : recienConectado ? "Cuenta de Google conectada: con el PIN se traen tus datos del Drive."
+    : modo === "crear" ? "¿Ya usás la app en otro celular o en la computadora? Ingresá con Google para traer tus datos."
+    : "Sin cuenta de Google: los datos están solo en este dispositivo. Ingresá con Google para traer (y guardar) tus datos de Drive; lo de acá no se pierde.";
+  $("#pin-google").hidden = !!cuenta || recienConectado || modo === "cambiar";
   $("#pin-titulo").textContent = titulo; $("#pin-ayuda").textContent = ayuda; $("#pin-ok").textContent = boton;
   $("#pin2").hidden = modo === "desbloquear";
   $("#pin").placeholder = modo === "cambiar" ? "PIN actual" : "PIN";
@@ -1040,6 +1049,7 @@ function configurarSeguridad() {
     } catch (e) { mostrar(e.message); }
     finally { boton.disabled = false; }
   });
+  $("#pin-google").addEventListener("click", () => $("#conectar-inicio").click());
   $("#olvide-pin").addEventListener("click", async (ev) => {
     ev.preventDefault();
     if (estado.modoPin === "cambiar") return ir("config");
@@ -1059,7 +1069,7 @@ function configurarSeguridad() {
 }
 
 // ---------------- Actualizaciones de la app ----------------
-const VERSION_APP = "13"; // igual que VERSION en sw.js
+const VERSION_APP = "14"; // igual que VERSION en sw.js
 function registrarActualizaciones() {
   if (!("serviceWorker" in navigator)) return;
   const habia = !!navigator.serviceWorker.controller;
