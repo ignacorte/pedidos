@@ -259,10 +259,12 @@ const Almacen = (() => {
     try { await navigator.storage?.persist?.(); } catch { /* el navegador decide */ }
   }
 
+  // Sello de cambio: siempre posterior al anterior del mismo registro (un dispositivo con el reloj adelantado no le gana a un cambio posterior)
+  const sello = (previo, ahora = Date.now()) => Math.max(ahora, (previo?.actualizado || 0) + 1);
   // Guardar o borrar un registro; dispara la sincronización con Drive en segundo plano
   async function guardar(coleccion, registro) {
-    const r = { ...registro, id: registro.id || nuevoId(), actualizado: Date.now() };
-    const i = doc[coleccion].findIndex((x) => x.id === r.id);
+    const id = registro.id || nuevoId(), i = doc[coleccion].findIndex((x) => x.id === id);
+    const r = { ...registro, id, actualizado: sello(doc[coleccion][i]) };
     if (i >= 0) doc[coleccion][i] = r; else doc[coleccion].push(r);
     cambios++;
     await confirmar();
@@ -272,8 +274,8 @@ const Almacen = (() => {
   async function guardarVarios(coleccion, registros) {
     const ahora = Date.now();
     for (const registro of registros) {
-      const r = { ...registro, id: registro.id || nuevoId(), actualizado: ahora };
-      const i = doc[coleccion].findIndex((x) => x.id === r.id);
+      const id = registro.id || nuevoId(), i = doc[coleccion].findIndex((x) => x.id === id);
+      const r = { ...registro, id, actualizado: sello(doc[coleccion][i], ahora) };
       if (i >= 0) doc[coleccion][i] = r; else doc[coleccion].push(r);
     }
     cambios++;
@@ -296,7 +298,7 @@ const Almacen = (() => {
     return r ? guardar(coleccion, { ...r, borrada: true }) : null;
   };
   async function ajuste(clave, valor) {
-    doc.ajustes[clave] = { valor, actualizado: Date.now() };
+    doc.ajustes[clave] = { valor, actualizado: sello(doc.ajustes[clave]) };
     cambios++;
     await confirmar();
   }
@@ -321,7 +323,7 @@ const Almacen = (() => {
   // Cuenta de Google y vencimiento del acceso: sin cifrar (no son datos de pacientes), para saber al abrir la app si hay que
   // renovar el acceso antes de pedir el PIN. El acceso de Google dura 1 hora: se renueva sin pedir nada (prompt=none)
   // mientras el profesional siga con su sesión de Google abierta en el navegador.
-  let cuentaPlano = null, venceToken = 0, pendiente = false, local = false, cambios = 0; // cambios: para no perder lo hecho durante una subida
+  let cuentaPlano = null, venceToken = 0, pendiente = false, local = false, cambios = 0, cuentaVerificada = false; // cambios: para no perder lo hecho durante una subida
   async function leerMeta() {
     cuentaPlano = (await idbLeer("cuenta")) || null;
     local = !!(await idbLeer("local"));
@@ -334,6 +336,7 @@ const Almacen = (() => {
     if (!CONFIG.GOOGLE_CLIENT_ID) throw new Error("Falta configurar GOOGLE_CLIENT_ID en config.js");
     const estado = nuevoId();
     sessionStorage.setItem("ped_estado", estado);
+    try { localStorage.setItem("ped_estado", estado); } catch { /* nada */ } // la app instalada puede volver de Google en otra pestaña
     const p = new URLSearchParams({ client_id: CONFIG.GOOGLE_CLIENT_ID, redirect_uri: location.origin + location.pathname,
       response_type: "token", scope: "https://www.googleapis.com/auth/drive.file", include_granted_scopes: "true", state: estado });
     const cuenta = elegir ? "" : doc.cuenta || cuentaPlano;
@@ -349,7 +352,10 @@ const Almacen = (() => {
     if (!/access_token|error=/.test(location.hash)) return null;
     const h = new URLSearchParams(location.hash.slice(1));
     history.replaceState(null, "", location.pathname);
-    if (h.get("state") !== sessionStorage.getItem("ped_estado")) return null;
+    let otro = null;
+    try { otro = localStorage.getItem("ped_estado"); localStorage.removeItem("ped_estado"); } catch { /* nada */ }
+    if (!h.get("state") || ![sessionStorage.getItem("ped_estado"), otro].includes(h.get("state"))) return null;
+    cuentaVerificada = false;
     if (h.get("error")) return { error: h.get("error") };
     tokenMem = { valor: h.get("access_token"), vence: Date.now() + (+h.get("expires_in") || 3600) * 1000 }; // se guarda cifrado al desbloquear
     venceToken = tokenMem.vence;
@@ -374,9 +380,17 @@ const Almacen = (() => {
       if (r.status === 401) { tokenMem = null; guardarToken(); anotar("Venció el acceso de Google"); throw Object.assign(new Error("Volvé a conectar Google Drive"), { reconectar: true }); }
       if ((r.status === 429 || r.status >= 500) && intento < 3) { await new Promise((ok) => setTimeout(ok, 1000 * 2 ** intento)); continue; }
       if (!r.ok) {
-        const detalle = await r.json().then((j) => j.error?.message || "").catch(() => "");
+        const j = await r.json().catch(() => ({}));
+        const detalle = j.error?.message || "", motivo = j.error?.errors?.[0]?.reason || "";
+        if (r.status === 403 && /ratelimit/i.test(motivo) && intento < 3) { await new Promise((ok) => setTimeout(ok, 2000 * 2 ** intento)); continue; }
         anotar(`Google Drive respondió ${r.status}${detalle ? ": " + detalle : ""} (${(opciones.method || "GET")} ${url.replace(/\?.*/, "").split("/").slice(-2).join("/")})`);
-        throw Object.assign(new Error("Google Drive respondió " + r.status + (detalle ? ": " + detalle : "")), { status: r.status });
+        // Al usuario, en castellano y sin tecnicismos (el detalle queda en el registro de problemas con el Drive)
+        const texto = /storageQuota|quotaExceeded/i.test(motivo + detalle) ? "tu Google Drive está lleno: liberá espacio para que se siga guardando"
+          : r.status === 404 ? "no se encontró un archivo en tu Drive (¿se borró o se movió?)"
+          : r.status === 403 ? "Google Drive no dio permiso para esta acción"
+          : r.status === 400 ? "Google Drive no aceptó el archivo"
+          : `Google Drive no respondió bien (error ${r.status}); se reintenta solo`;
+        throw Object.assign(new Error(texto), { status: r.status, detalle });
       }
       return r;
     }
@@ -435,7 +449,9 @@ const Almacen = (() => {
     if (!(await buscar(nombre))) {
       await drive(`${API}/${archivo.id}/copy`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: nombre, parents: [await carpetaRuta(["Respaldos"])] }) });
       const limite = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
-      for (const f of await respaldos()) if (f.dia < limite) await drive(`${API}/${f.id}`, { method: "DELETE" }).catch(() => {});
+      // Los viejos van a la papelera del Drive (no se borran) y siempre quedan los 30 más nuevos aunque la fecha del celular esté mal
+      for (const f of (await respaldos()).slice(30)) if (f.dia < limite)
+        await drive(`${API}/${f.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ trashed: true }) }).catch(() => {});
     }
     respaldoDe = dia;
   }
@@ -476,9 +492,17 @@ const Almacen = (() => {
     sincronizando = (async () => {
       avisar("sincronizando…");
       try {
-        if (!doc.cuenta) {
+        // Una vez por sesión: que el acceso de Google sea de la cuenta de estos datos (si no, se mezclarían dos Drive)
+        if (!doc.cuenta || !cuentaVerificada) {
           const sobre = await (await drive("https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)")).json();
-          doc.cuenta = sobre.user.emailAddress;
+          const de = sobre.user.emailAddress;
+          if (doc.cuenta && de && de.toLowerCase() !== doc.cuenta.toLowerCase()) {
+            tokenMem = null; guardarToken();
+            anotar(`Se ingresó con ${de}, pero los datos de este dispositivo son de ${doc.cuenta}`);
+            throw Object.assign(new Error(`Entraste a Google con ${de}, pero tus datos están en ${doc.cuenta}. Volvé a ingresar con esa cuenta: no se mezcló nada.`), { otraCuenta: true });
+          }
+          if (!doc.cuenta) doc.cuenta = de;
+          cuentaVerificada = true;
         }
         if (cuentaPlano !== doc.cuenta) { cuentaPlano = doc.cuenta; await idbEscribir({ cuenta: doc.cuenta }); }
         const cambiosAlEmpezar = cambios;
@@ -507,7 +531,8 @@ const Almacen = (() => {
         else if (cambios === cambiosAlEmpezar) avisar("documentos sin subir");
         else { avisar("sincronizando…"); setTimeout(() => sincronizar().catch(() => {}), 500); }
       } catch (e) {
-        avisar(e.reconectar ? "cambios sin subir" : "sin conexión: se guarda en el celular");
+        avisar(e.reconectar ? "cambios sin subir" : e.otraCuenta ? "otra cuenta de Google: no se subió nada"
+          : e.status ? "no se pudo subir (" + e.message + "): queda guardado en el celular" : "sin conexión: se guarda en el celular");
         throw e;
       } finally { sincronizando = null; }
     })();
